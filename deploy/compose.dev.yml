@@ -1,0 +1,15 @@
+services:
+  mysql:
+    ports: ["127.0.0.1:3307:3306"]
+  minio:
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+  backend:
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      DEMO_ENABLED: "true"
+      API_DOCS_ENABLED: "true"
+      CORS_ORIGINS: http://localhost:5173,http://localhost:5174,http://localhost:8088
+  registry:
+    ports: ["127.0.0.1:8761:8761"]
+  gateway:
+    ports: ["127.0.0.1:8081:8081"]

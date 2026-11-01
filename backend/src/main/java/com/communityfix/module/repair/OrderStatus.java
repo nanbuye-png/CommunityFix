@@ -1,0 +1,2 @@
+package com.communityfix.module.repair;
+public enum OrderStatus { SUBMITTED,REJECTED,PENDING_DISPATCH,ASSIGNED,ACCEPTED,IN_PROGRESS,PENDING_CONFIRM,CLOSED,CANCELED }

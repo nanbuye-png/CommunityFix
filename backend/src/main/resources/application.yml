@@ -1,0 +1,83 @@
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+spring:
+  application:
+    name: communityfix-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/communityfix?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8}
+    username: ${DB_USER:communityfix}
+    password: ${DB_PASSWORD}
+    hikari:
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+      maximum-pool-size: 10
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 50MB
+  jackson:
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    call-setters-on-nulls: true
+    return-instance-for-empty-row: true
+communityfix:
+  jwt-secret: ${JWT_SECRET}
+  jwt-issuer: communityfix
+  jwt-audience: communityfix-client
+  cors-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+  bootstrap-username: ${BOOTSTRAP_USERNAME:}
+  bootstrap-password: ${BOOTSTRAP_PASSWORD:}
+  demo-enabled: ${DEMO_ENABLED:false}
+  demo-sync-passwords: ${DEMO_SYNC_PASSWORDS:false}
+  demo-passwords:
+    property: ${DEMO_PROPERTY_PASSWORD:}
+    resident: ${DEMO_RESIDENT_PASSWORD:}
+    worker: ${DEMO_WORKER_PASSWORD:}
+  storage:
+    mode: ${STORAGE_MODE:minio}
+    directory: ${STORAGE_DIRECTORY:.local/uploads}
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+    bucket: ${MINIO_BUCKET:communityfix}
+  wechat:
+    app-id: ${WECHAT_APP_ID:}
+    app-secret: ${WECHAT_APP_SECRET:}
+    order-template-id: ${WECHAT_ORDER_TEMPLATE_ID:}
+    order-number-field: ${WECHAT_ORDER_NUMBER_FIELD:}
+    order-status-field: ${WECHAT_ORDER_STATUS_FIELD:}
+  ai:
+    endpoint: ${AI_ENDPOINT:}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:}
+    failure-threshold: ${AI_FAILURE_THRESHOLD:3}
+    cooldown-seconds: ${AI_COOLDOWN_SECONDS:60}
+    retention-days: ${AI_RETENTION_DAYS:30}
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true

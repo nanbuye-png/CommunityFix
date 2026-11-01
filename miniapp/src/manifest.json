@@ -1,0 +1,25 @@
+{
+    "name":  "CommunityFix社区报修",
+    "appid":  "__UNI__CF00001",
+    "description":  "基于Spring Cloud的社区便民报修服务系统的设计与实现",
+    "versionName":  "0.2.0",
+    "versionCode":  "200",
+    "transformPx":  false,
+    "uniStatistics":  {
+                          "enable":  false
+                      },
+    "h5":  {
+               "title":  "基于Spring Cloud的社区便民报修服务系统的设计与实现",
+               "router":  {
+                              "mode":  "hash"
+                          }
+           },
+    "mp-weixin":  {
+                      "appid":  "wxcc787c446be1394a",
+                      "setting":  {
+                                      "urlCheck":  true
+                                  },
+                      "usingComponents":  true
+                  },
+    "vueVersion":  "3"
+}

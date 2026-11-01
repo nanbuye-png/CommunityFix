@@ -1,0 +1,6 @@
+{
+  "name":"communityfix-admin", "version":"0.1.0", "private":true, "type":"module",
+  "scripts":{"dev":"vite --host 0.0.0.0","build":"vue-tsc -b && vite build","preview":"vite preview --host 127.0.0.1"},
+  "dependencies":{"vue":"3.5.44","vue-router":"4.6.3","pinia":"3.0.4","axios":"1.20.0","element-plus":"2.14.7","echarts":"6.1.0","lucide-vue-next":"0.468.0"},
+  "devDependencies":{"vite":"8.3.4","@vitejs/plugin-vue":"6.0.10","typescript":"5.9.3","vue-tsc":"3.2.4","@types/node":"24.10.1"}
+}

@@ -1,0 +1,106 @@
+# Standalone configuration. Never combine with compose.yml or deploy/.env.
+x-backend: &backend
+  build: {context: ../backend}
+  image: ${CF_PROJECT}-backend:acceptance
+  environment: &backend-env
+    DB_URL: jdbc:mysql://mysql:3306/communityfix?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
+    DB_USER: communityfix
+    DB_PASSWORD: ${CF_PASSWORD:?Use acceptance.py init}
+    JWT_SECRET: ${CF_JWT:?Use acceptance.py init}
+    BOOTSTRAP_USERNAME: admin
+    BOOTSTRAP_PASSWORD: ${CF_PASSWORD}
+    DEMO_ENABLED: "true"
+    DEMO_SYNC_PASSWORDS: "false"
+    STORAGE_MODE: minio
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_ACCESS_KEY: acceptance
+    MINIO_SECRET_KEY: ${CF_PASSWORD}
+    MINIO_BUCKET: acceptance
+    EUREKA_ENABLED: "true"
+    EUREKA_URL: http://registry:8761/eureka/
+    AI_ENDPOINT: http://mock/chat/completions
+    AI_API_KEY: synthetic-only
+    AI_MODEL: acceptance-mock
+    WECHAT_APP_ID: ""
+    WECHAT_APP_SECRET: ""
+    WECHAT_ORDER_TEMPLATE_ID: ""
+    API_DOCS_ENABLED: "false"
+    CORS_ORIGINS: http://localhost:${CF_WEB_PORT},http://localhost:${CF_H5_PORT}
+    JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m
+    COMMUNITYFIX_MAINTENANCE_SCAN_DELAY_MS: "5000"
+    COMMUNITYFIX_MAINTENANCE_CLEANUP_DELAY_MS: "5000"
+  depends_on:
+    mysql: {condition: service_healthy}
+    minio: {condition: service_started}
+    registry: {condition: service_started}
+    mock: {condition: service_started}
+services:
+  mysql:
+    image: mysql:8.4.5
+    environment:
+      MYSQL_DATABASE: communityfix
+      MYSQL_USER: communityfix
+      MYSQL_PASSWORD: ${CF_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${CF_PASSWORD}
+      TZ: UTC
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--default-time-zone=+00:00"]
+    ports: ["127.0.0.1:${CF_DB_PORT}:3306"]
+    volumes: ["mysql-data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+  redis:
+    image: redis:7.4.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  minio:
+    image: ${CF_MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: acceptance
+      MINIO_ROOT_PASSWORD: ${CF_PASSWORD}
+    ports: ["127.0.0.1:${CF_MINIO_PORT}:9000"]
+    volumes: ["minio-data:/data"]
+  registry:
+    build: {context: ../registry}
+    image: ${CF_PROJECT}-registry:acceptance
+    environment:
+      EUREKA_HOSTNAME: registry
+      EUREKA_URL: http://registry:8761/eureka/
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    ports: ["127.0.0.1:${CF_REGISTRY_PORT}:8761"]
+  backend:
+    <<: *backend
+    ports: ["127.0.0.1:${CF_BACKEND_PORT}:8080"]
+  backend2:
+    <<: *backend
+    ports: ["127.0.0.1:${CF_BACKEND2_PORT}:8080"]
+    # Seed demo fixtures once before the second process starts.
+    profiles: ["multi"]
+  gateway:
+    build: {context: ../gateway}
+    image: ${CF_PROJECT}-gateway:acceptance
+    environment:
+      EUREKA_URL: http://registry:8761/eureka/
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+    ports: ["127.0.0.1:${CF_GATEWAY_PORT}:8081"]
+    depends_on: [registry, backend]
+  mock:
+    image: nginx:1.28.0-alpine
+    volumes: ["./acceptance/mock.conf:/etc/nginx/conf.d/default.conf:ro"]
+  nginx:
+    image: nginx:1.28.0-alpine
+    ports: ["127.0.0.1:${CF_WEB_PORT}:80", "127.0.0.1:${CF_H5_PORT}:81"]
+    volumes:
+      - ../admin-web/dist:/web/admin:ro
+      - ../miniapp/dist/build/h5:/web/h5:ro
+      - ./acceptance/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [gateway]
+volumes:
+  mysql-data:
+  minio-data:
