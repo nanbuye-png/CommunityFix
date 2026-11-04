@@ -18,7 +18,7 @@ public class NotificationController {
     @GetMapping("/outbox") ApiResponse<?> outbox(@RequestParam(defaultValue="FAILED") String status,@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int size){
         CurrentUser.get().role("SUPER_ADMIN");
         if(!java.util.Set.of("PENDING","PROCESSING","SENT","FAILED").contains(status))throw ApiException.bad("通知状态无效");
-        return ApiResponse.ok(Pages.result(db.rows("SELECT id,event_key,recipient_id,channel,status,attempts,next_retry_at,last_error,created_at,updated_at FROM notification_outbox WHERE channel='WECHAT' AND status=? ORDER BY id DESC LIMIT ? OFFSET ?",status,Pages.size(size),Pages.offset(page,size)),db.count("SELECT COUNT(*) FROM notification_outbox WHERE channel='WECHAT' AND status=?",status),page,size));
+        return ApiResponse.ok(Pages.result(db.rows("SELECT id,event_key,recipient_id,channel,status,attempts,next_retry_at,last_error,mq_publish_attempts,mq_next_publish_at,mq_last_error,created_at,updated_at FROM notification_outbox WHERE channel='WECHAT' AND status=? ORDER BY id DESC LIMIT ? OFFSET ?",status,Pages.size(size),Pages.offset(page,size)),db.count("SELECT COUNT(*) FROM notification_outbox WHERE channel='WECHAT' AND status=?",status),page,size));
     }
     @GetMapping("/outbox/summary") ApiResponse<?> outboxSummary(){
         CurrentUser.get().role("SUPER_ADMIN");
@@ -28,7 +28,7 @@ public class NotificationController {
     }
     @PostMapping("/outbox/{id}/retry") @Transactional ApiResponse<?> retry(@PathVariable long id){
         CurrentUser.get().role("SUPER_ADMIN");
-        int updated=db.execute("UPDATE notification_outbox SET status='PENDING',attempts=0,next_retry_at=NULL,locked_until=NULL,last_error=NULL,updated_at=UTC_TIMESTAMP(3) WHERE id=? AND channel='WECHAT' AND status='FAILED'",id);
+        int updated=db.execute("UPDATE notification_outbox SET status='PENDING',attempts=0,next_retry_at=NULL,locked_until=NULL,last_error=NULL,mq_next_publish_at=NULL,mq_last_error=NULL,updated_at=UTC_TIMESTAMP(3) WHERE id=? AND channel='WECHAT' AND status='FAILED'",id);
         if(updated==0)throw ApiException.conflict();
         db.insert("sys_operation_log",Db.fields("operator_id",CurrentUser.get().id(),"action","NOTIFICATION_RETRY","target_type","notification_outbox","target_id",id,"result","SUCCESS","request_id",MDC.get("requestId")));
         return ApiResponse.ok(null);

@@ -1,0 +1,64 @@
+package com.communityfix.module.billing;
+
+import com.communityfix.common.*;
+import com.communityfix.module.repair.OrderService;
+import com.communityfix.module.notification.NotificationService;
+import com.communityfix.security.CurrentUser;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.MDC;
+import java.util.*;
+
+@Service
+public class BillingService {
+    @org.springframework.beans.factory.annotation.Autowired private com.communityfix.module.notification.WechatSubscriptionService subscriptions;
+    private final Db db;private final OrderService orders;private final BillingPolicy policy;private final IdempotencyService idem;private final NotificationService notifications;private final ObjectMapper json;private final boolean mockEnabled;
+    public BillingService(Db db,OrderService orders,BillingPolicy policy,IdempotencyService idem,NotificationService notifications,ObjectMapper json,
+        @Value("${communityfix.billing.mock-enabled:false}") boolean mockEnabled,@Value("${communityfix.demo-enabled:false}") boolean demo){
+        if(mockEnabled&&!demo)throw new IllegalArgumentException("Mock payment requires demo mode");
+        this.db=db;this.orders=orders;this.policy=policy;this.idem=idem;this.notifications=notifications;this.json=json;this.mockEnabled=mockEnabled;
+    }
+    public Object view(long id){orders.read(id);return Db.fields("quotes",db.rows("SELECT * FROM repair_quote WHERE order_id=? ORDER BY revision DESC",id),"acceptedQuote",policy.accepted(id),"bill",db.row("SELECT * FROM repair_bill WHERE order_id=?",id),"payments",db.rows("SELECT p.* FROM repair_payment p JOIN repair_bill b ON b.id=p.bill_id WHERE b.order_id=?",id),"mockEnabled",mockEnabled);}
+    private Map<String,Object> lock(long id){var o=db.required("SELECT * FROM repair_order WHERE id=? FOR UPDATE",id);orders.checkRead(o);if(Db.integer(o,"billingVersion")!=1)throw ApiException.bad("历史工单不启用收费");return o;}
+    private void manager(Map<String,Object> o){CurrentUser.get().community(Db.id(o,"communityId"));CurrentUser.get().permission("repair:assign");}
+    private void owner(Map<String,Object> o){CurrentUser.get().role("RESIDENT");if(Db.id(o,"residentId")!=CurrentUser.get().id())throw ApiException.forbidden();}
+    private void audit(String action,long id){db.insert("sys_operation_log",Db.fields("operator_id",CurrentUser.get().id(),"action",action,"target_type","repair_billing","target_id",id,"result","SUCCESS","request_id",Optional.ofNullable(MDC.get("requestId")).orElseGet(()->UUID.randomUUID().toString())));}
+    @Transactional public Object scope(long id,BillingController.Scope body,String key){return idem.run("billing:scope:"+id,key,body,()->{
+        var o=lock(id);manager(o);if(!"SUBMITTED".equals(o.get("status")))throw ApiException.conflict();
+        db.execute("UPDATE repair_order SET facility_scope=?,location_text=?,version=version+1 WHERE id=?",body.facilityScope(),body.locationText(),id);
+        db.insert("repair_order_log",Db.fields("order_id",id,"old_status","SUBMITTED","new_status","SUBMITTED","operator_id",CurrentUser.get().id(),"remark",body.reason(),"action","billing_scope","round_no",o.get("roundNo"),"old_version",o.get("version"),"new_version",Db.integer(o,"version")+1,"request_id",MDC.get("requestId")));
+        audit("BILLING_SCOPE",id);return view(id);
+    });}
+    @Transactional public Object quote(long id,BillingController.Quote body,String key){return idem.run("billing:quote:"+id,key,body,()->{
+        var o=lock(id);manager(o);if(!policy.chargeable(o)||!Set.of("PENDING_DISPATCH","ASSIGNED","ACCEPTED","IN_PROGRESS").contains(o.get("status")))throw ApiException.conflict();
+        var latest=db.row("SELECT revision FROM repair_quote WHERE order_id=? ORDER BY revision DESC LIMIT 1",id);int revision=latest==null?0:Db.integer(latest,"revision");if(revision!=body.revision())throw ApiException.conflict();
+        long total=0;for(var item:body.items())total=Math.addExact(total,Math.multiplyExact(item.quantity(),item.unitPriceFen()));
+        if(total<=0||total>10000000)throw ApiException.bad("单张报价总额须为0.01至100000元");
+        String items;try{items=json.writeValueAsString(body.items());}catch(Exception e){throw new IllegalStateException(e);}
+        db.execute("UPDATE repair_quote SET status='SUPERSEDED' WHERE order_id=? AND status='PROPOSED'",id);
+        long q=db.insert("repair_quote",Db.fields("order_id",id,"revision",revision+1,"items_json",items,"amount_fen",total,"reason",body.reason(),"created_by",CurrentUser.get().id()));
+        notifications.send(Db.id(o,"residentId"),id,"quote:"+q,"请确认维修报价","报价或追加费用须经你确认，请查看工单费用明细。");subscriptions.enqueueQuote(Db.id(o,"residentId"),id,q,(String)o.get("orderNo"),total);audit("QUOTE_CREATE",q);return view(id);
+    });}
+    @Transactional public Object decision(long id,BillingController.Decision body,String key){return idem.run("billing:decision:"+id,key,body,()->{
+        var o=lock(id);owner(o);if(!Set.of("PENDING_DISPATCH","ASSIGNED","ACCEPTED","IN_PROGRESS").contains(o.get("status")))throw ApiException.conflict();
+        var q=db.required("SELECT * FROM repair_quote WHERE id=? AND order_id=? FOR UPDATE",body.quoteId(),id);
+        if(!"PROPOSED".equals(q.get("status")))throw ApiException.conflict();
+        db.execute("UPDATE repair_quote SET status=?,decided_by=?,decided_at=UTC_TIMESTAMP(3) WHERE id=?",body.accepted()?"ACCEPTED":"REJECTED",CurrentUser.get().id(),body.quoteId());
+        for(var admin:db.rows("SELECT user_id FROM admin_community WHERE community_id=?",o.get("communityId")))notifications.send(Db.id(admin,"userId"),id,"quote-decision:"+body.quoteId(),"维修报价已回复",body.accepted()?"居民已确认报价。":"居民已拒绝本次报价，请协调处理；此前已确认报价仍有效。");
+        audit(body.accepted()?"QUOTE_ACCEPT":"QUOTE_REJECT",body.quoteId());return view(id);
+    });}
+    @Transactional public Object pay(long id,BillingController.Pay body,String key){return idem.run("billing:mock-pay:"+id,key,body,()->{
+        if(!mockEnabled)throw new ApiException(409,"MOCK_PAYMENT_DISABLED","模拟支付未开启；当前不支持真实扣款");
+        var o=lock(id);owner(o);if(!"CLOSED".equals(o.get("status")))throw ApiException.conflict();
+        var bill=db.required("SELECT * FROM repair_bill WHERE id=? AND order_id=? AND payer_id=? FOR UPDATE",body.billId(),id,CurrentUser.get().id());
+        if("MOCK_PAID".equals(bill.get("status")))return view(id);
+        if(!"UNPAID".equals(bill.get("status")))throw ApiException.conflict();
+        db.insert("repair_payment",Db.fields("bill_id",body.billId(),"payment_no","MOCK-"+UUID.randomUUID(),"channel","MOCK","amount_fen",bill.get("amountFen"),"status","MOCK_SUCCESS"));
+        db.execute("UPDATE repair_bill SET status='MOCK_PAID',paid_at=UTC_TIMESTAMP(3) WHERE id=?",body.billId());
+        notifications.send(CurrentUser.get().id(),id,"mock-paid:"+body.billId(),"模拟支付完成","本次仅为演示，不产生真实扣款或收款。");
+        for(var admin:db.rows("SELECT user_id FROM admin_community WHERE community_id=?",o.get("communityId")))notifications.send(Db.id(admin,"userId"),id,"mock-paid:"+body.billId(),"账单模拟支付完成","本次为模拟交易，不代表真实到账。");
+        audit("PAYMENT_MOCK",body.billId());return view(id);
+    });}
+}

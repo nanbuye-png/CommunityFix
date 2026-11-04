@@ -23,6 +23,7 @@ public class SecurityConfig {
     }
     @Bean SecurityFilterChain security(HttpSecurity http,JwtFilter jwt,ObjectMapper json,@Value("${springdoc.api-docs.enabled}") boolean docsEnabled) throws Exception {
         http.csrf(c->c.disable()).cors(c->{}).sessionManagement(c->c.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(c->c.requestMatchers("/api/notifications/live").permitAll())
             .authorizeHttpRequests(c->{c.requestMatchers("/api/auth/login","/api/auth/register","/api/auth/registration-communities","/api/auth/wechat-login","/actuator/health/**","/api/files/*/content").permitAll();if(docsEnabled)c.requestMatchers("/v3/api-docs/**","/swagger-ui/**","/swagger-ui.html").permitAll();c.anyRequest().authenticated();})
             .exceptionHandling(c->c.authenticationEntryPoint((req,res,ex)->{res.setStatus(401);res.setContentType("application/json;charset=UTF-8");json.writeValue(res.getWriter(),ApiResponse.error(401,"UNAUTHENTICATED","请先登录"));})
                 .accessDeniedHandler((req,res,ex)->{res.setStatus(403);res.setContentType("application/json;charset=UTF-8");json.writeValue(res.getWriter(),ApiResponse.error(403,"FORBIDDEN","没有此操作的权限"));}))

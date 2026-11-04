@@ -1,0 +1,114 @@
+{
+  "result": "PASS",
+  "review_date": "2026-11-02",
+  "source": "repair_candidates_v1.csv",
+  "source_sha256": "61dcf96a3d4cf826770430333893289cf6e9f81ce46a93a067a5234d50111754",
+  "reference": "repair_reference_ai_reviewed_v1.csv",
+  "reference_sha256": "9c463920e86f88be3e2586100a28344ee6efd43568ca39a687e4103971384843",
+  "total": 120,
+  "scored": 107,
+  "excluded": 13,
+  "excluded_ids": [
+    "R023",
+    "R028",
+    "R029",
+    "R030",
+    "R058",
+    "R059",
+    "R060",
+    "R088",
+    "R089",
+    "R090",
+    "R118",
+    "R119",
+    "R120"
+  ],
+  "label_changes": [],
+  "scored_distribution": {
+    "管道维修": {
+      "total": 26,
+      "priorities": {
+        "NORMAL": 8,
+        "HIGH": 9,
+        "URGENT": 9
+      }
+    },
+    "水电维修": {
+      "total": 27,
+      "priorities": {
+        "NORMAL": 9,
+        "HIGH": 9,
+        "URGENT": 9
+      }
+    },
+    "家电维修": {
+      "total": 27,
+      "priorities": {
+        "NORMAL": 9,
+        "HIGH": 9,
+        "URGENT": 9
+      }
+    },
+    "其他维修": {
+      "total": 27,
+      "priorities": {
+        "NORMAL": 9,
+        "HIGH": 9,
+        "URGENT": 9
+      }
+    }
+  },
+  "all_distribution": {
+    "管道维修": {
+      "total": 30,
+      "priorities": {
+        "NORMAL": 11,
+        "HIGH": 10,
+        "URGENT": 9
+      }
+    },
+    "水电维修": {
+      "total": 30,
+      "priorities": {
+        "NORMAL": 11,
+        "HIGH": 10,
+        "URGENT": 9
+      }
+    },
+    "家电维修": {
+      "total": 30,
+      "priorities": {
+        "NORMAL": 11,
+        "HIGH": 10,
+        "URGENT": 9
+      }
+    },
+    "其他维修": {
+      "total": 30,
+      "priorities": {
+        "NORMAL": 11,
+        "HIGH": 10,
+        "URGENT": 9
+      }
+    }
+  },
+  "scored_scene_distribution": {
+    "清晰描述": 60,
+    "口语表达": 24,
+    "边界案例": 23
+  },
+  "checks": {
+    "source_bytes_unchanged": true,
+    "human_columns_untouched": true,
+    "ids_unique_and_complete": true,
+    "exact_descriptions_unique": true,
+    "original_fields_preserved": true,
+    "labels_valid": true,
+    "status_scoring_consistent": true,
+    "review_reasons_present": true,
+    "all_insufficient_excluded": true,
+    "utf8_bom_crlf_roundtrip": true,
+    "no_formula_prefix": true
+  },
+  "limits": "结构检查通过不等于语义正确或人工确认；未调用供应商、未进行模型效果评测。"
+}

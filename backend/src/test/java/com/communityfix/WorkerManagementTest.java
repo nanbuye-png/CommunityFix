@@ -63,7 +63,7 @@ class WorkerManagementTest {
   long room=Db.id(db.required("SELECT room_id FROM resident_room_binding r JOIN sys_user u ON u.id=r.user_id WHERE u.username='resident' AND r.status='APPROVED' LIMIT 1"),"roomId");
   String resident=login("resident");
   var headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.setBearerAuth(resident);headers.set("Idempotency-Key",UUID.randomUUID().toString());
-  var order=ok(rest.exchange("/api/repair/orders",HttpMethod.POST,new HttpEntity<>(Map.of("roomId",room,"categoryId",1,"title","维修人员归属测试","description","检查服务关系","priority","NORMAL","attachmentIds",List.of()),headers),JsonNode.class));
+  var order=ok(rest.exchange("/api/repair/orders",HttpMethod.POST,new HttpEntity<>(Map.of("facilityScope","PUBLIC","locationText","楼道公共设施测试位置","roomId",room,"categoryId",1,"title","维修人员归属测试","description","检查服务关系","priority","NORMAL","attachmentIds",List.of()),headers),JsonNode.class));
   String oid=order.path("id").asText();
   headers.setBearerAuth(p);headers.set("Idempotency-Key",UUID.randomUUID().toString());
   order=ok(rest.exchange("/api/repair/orders/"+oid+"/review",HttpMethod.POST,new HttpEntity<>(Map.of("version",order.path("version").asInt(),"approved",true),headers),JsonNode.class));
@@ -112,7 +112,7 @@ class WorkerManagementTest {
   var resident=ok(call(null,HttpMethod.POST,"/auth/register",Map.of("username","bound"+UUID.randomUUID().toString().replace("-",""),"password",password,"nickname","待绑定居民","role","RESIDENT")));
   String uid=resident.path("user").path("id").asText(),token=resident.path("token").asText();
   assertEquals(404,call(property,HttpMethod.PATCH,"/system/community-users/"+uid,Map.of("nickname","越权")).getStatusCode().value());
-  ok(call(token,HttpMethod.POST,"/room-bindings",Map.of("roomId",room)));
+  ok(call(token,HttpMethod.POST,"/room-bindings",Map.of("facilityScope","PUBLIC","locationText","楼道公共设施测试位置","roomId",room)));
   assertEquals(404,call(other,HttpMethod.PATCH,"/system/community-users/"+uid,Map.of("nickname","越权")).getStatusCode().value());
   assertEquals(403,call(property,HttpMethod.PATCH,"/system/community-users/"+uid,Map.of("roles",List.of("ADMIN"))).getStatusCode().value());
   ok(call(property,HttpMethod.PATCH,"/system/community-users/"+uid,Map.of("nickname","物业确认居民")));

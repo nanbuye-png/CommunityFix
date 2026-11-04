@@ -1,9 +1,10 @@
 import axios from 'axios'
+import { startNotifications } from './liveNotifications'
 import { ElMessage } from 'element-plus'
 export const http=axios.create({baseURL:'/api',timeout:15000})
 let token=''
 let expired:()=>void=()=>{}
-export function setSession(value:string,onExpire?:()=>void){token=value;if(onExpire)expired=onExpire}
+export function setSession(value:string,onExpire?:()=>void){token=value;if(onExpire)expired=onExpire;startNotifications(value,()=>expired())}
 http.interceptors.request.use(config=>{if(token)config.headers.Authorization=`Bearer ${token}`;return config})
 http.interceptors.response.use(response=>response.data.data,error=>{if(error.response?.status===401)expired();if(error.code!=='ERR_CANCELED'&&!error.config?.url?.endsWith('/events'))ElMessage.error(error.response?.data?.message??'无法连接服务，请检查网络后重试');return Promise.reject(error)})
 export function key(){

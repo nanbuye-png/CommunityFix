@@ -22,6 +22,9 @@ public class WechatMessageSender {
     private final ObjectMapper json;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final String appId, appSecret, templateId, orderField, statusField;
+    @Value("${communityfix.wechat.quote-template-id:}") private String quoteTemplate="";
+    @Value("${communityfix.wechat.quote-order-field:}") private String quoteOrderField="";
+    @Value("${communityfix.wechat.quote-amount-field:}") private String quoteAmountField="";
     private String accessToken;
     private Instant tokenExpiresAt = Instant.EPOCH;
 
@@ -39,22 +42,27 @@ public class WechatMessageSender {
         this.statusField = statusField;
     }
 
-    public boolean enabled() {
+    public boolean enabled(){return orderEnabled()||quoteEnabled();}
+    public boolean orderEnabled() {
         return !appId.isBlank() && !appSecret.isBlank() && !templateId.isBlank()
                 && !orderField.isBlank() && !statusField.isBlank() && !orderField.equals(statusField);
     }
 
+    public String quoteTemplateId(){return quoteTemplate;}
+    public boolean quoteEnabled(){return !appId.isBlank()&&!appSecret.isBlank()&&!quoteTemplate.isBlank()&&!quoteOrderField.isBlank()&&!quoteAmountField.isBlank()&&!quoteOrderField.equals(quoteAmountField);}
+    public String messageBody(String openid,String payload) throws Exception {
+        var event=json.readTree(payload);boolean quote="QUOTE".equals(event.path("kind").asText());
+        if(quote?!quoteEnabled():!orderEnabled())throw new IllegalStateException("Notification template not configured");
+        String selected=quote?quoteTemplate:templateId;
+        if(event.has("templateId")&&!selected.equals(event.path("templateId").asText()))throw new IllegalStateException("Queued template changed");
+        var fields=quote?Map.of(quoteOrderField,Map.of("value",event.path("orderNo").asText()),quoteAmountField,Map.of("value",java.math.BigDecimal.valueOf(event.path("amountFen").asLong(),2).toPlainString())):Map.of(orderField,Map.of("value",event.path("orderNo").asText()),statusField,Map.of("value",event.path("status").asText()));
+        return json.writeValueAsString(Map.of("touser",openid,"template_id",selected,"page",event.path("page").asText(),"data",fields));
+    }
     public String templateId() { return templateId; }
 
     public void send(String openid, String payload) throws Exception {
         if (!enabled()) throw new IllegalStateException("WeChat subscription delivery is not configured");
-        JsonNode event = json.readTree(payload);
-        String body = json.writeValueAsString(Map.of(
-                "touser", openid,
-                "template_id", templateId,
-                "page", event.path("page").asText(),
-                "data", Map.of(orderField, Map.of("value", event.path("orderNo").asText()),
-                        statusField, Map.of("value", event.path("status").asText()))));
+        String body = messageBody(openid,payload);
         HttpRequest request = HttpRequest.newBuilder(URI.create(API + "/cgi-bin/message/subscribe/send?access_token=" + token()))
                 .header("Content-Type", "application/json;charset=UTF-8")
                 .timeout(Duration.ofSeconds(8))

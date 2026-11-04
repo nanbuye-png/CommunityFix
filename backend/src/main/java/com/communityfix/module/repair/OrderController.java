@@ -11,7 +11,7 @@ import java.util.List;
 public class OrderController {
     private final OrderService service;
     public OrderController(OrderService service){this.service=service;}
-    public record Create(@NotNull @Positive Long roomId,@NotNull @Positive Long categoryId,@NotBlank @Size(max=100) String title,@NotBlank @Size(max=2000) String description,@NotNull @Pattern(regexp="NORMAL|HIGH|URGENT") String priority,@Size(max=9) List<@NotNull @Positive Long> attachmentIds,Instant appointmentStartAt,Instant appointmentEndAt,@Positive Long analysisId){}
+    public record Create(@NotNull @Positive Long roomId,@NotNull @Positive Long categoryId,@NotBlank @Size(max=100) String title,@NotBlank @Size(max=2000) String description,@NotNull @Pattern(regexp="NORMAL|HIGH|URGENT") String priority,@Size(max=9) List<@NotNull @Positive Long> attachmentIds,Instant appointmentStartAt,Instant appointmentEndAt,@Positive Long analysisId,@Pattern(regexp="PUBLIC|PRIVATE") String facilityScope,@Size(max=200) String locationText){}
     public record Action(@NotNull @Min(0) Integer version,Boolean approved,@Size(max=500) String reason,@Positive Long workerId,@Pattern(regexp="MANUAL|SMART") String dispatchType,@Positive Long recommendationId,@Size(max=2000) String content,@Size(max=9) List<@NotNull @Positive Long> attachmentIds){}
     public record Content(@NotBlank @Size(max=2000) String content){}
     @PostMapping ApiResponse<?> create(@Valid @RequestBody Create body,@RequestHeader("Idempotency-Key") String key){return ApiResponse.ok(service.create(body,key));}

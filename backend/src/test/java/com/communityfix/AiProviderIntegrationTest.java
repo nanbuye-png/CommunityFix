@@ -34,10 +34,12 @@ class AiProviderIntegrationTest {
                 String content=switch(mode.get()){
                     case "invalid" -> "not JSON";
                     case "unknown" -> "{\"categoryId\":\"99999999\",\"priority\":\"URGENT\",\"summary\":\"无效分类\"}";
+                    case "unsafe" -> "{\"categoryId\":\"1\",\"priority\":\"HIGH\",\"summary\":\"虚构已检修；危险操作步骤；保证五分钟上门\",\"instructions\":\"不得展示的操作\"}";
+                    case "labelsOnly" -> "{\"categoryId\":\"1\",\"priority\":\"NORMAL\"}";
                     default -> "{\"categoryId\":\"1\",\"priority\":\"NORMAL\",\"summary\":\"厨房水管漏水，联系13812345678\"}";
                 };
                 byte[] body=new ObjectMapper().writeValueAsBytes(Map.of("choices",List.of(Map.of("message",Map.of("content",content)))));
-                exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(mode.get().equals("error")?503:200,body.length);
+                exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(mode.get().equals("rateLimit")?429:mode.get().equals("error")?503:200,body.length);
                 exchange.getResponseBody().write(body);exchange.close();
             });server.start();return server;
         }catch(Exception ex){throw new ExceptionInInitializerError(ex);}
@@ -65,9 +67,40 @@ class AiProviderIntegrationTest {
     @Test void invalidResponsesFallBackWithoutChangingInput(){
         for(String invalid:List.of("invalid","unknown")){mode.set(invalid);var result=analyze("原始报修描述");assertEquals("MANUAL",result.path("source").asText());assertEquals("原始报修描述",result.path("summary").asText());assertTrue(result.path("categoryId").isNull());}
     }
+    @Test void providerRateLimitIsRecordedSeparatelyFromInvalidAnswers(){
+        mode.set("rateLimit");var result=analyze("水管漏水");
+        assertEquals("MANUAL",result.path("source").asText());assertEquals(1,requests.get());
+        assertEquals("AI_PROVIDER_RATE_LIMIT",db.required("SELECT error_code FROM ai_analysis_record WHERE id=?",result.path("analysisId").asText()).get("errorCode"));
+    }
+    @Test void unsafeFreeTextIsNeverReturnedOrRetainedAndUrgencyHasFloor(){
+        mode.set("unsafe");
+        for(String text:List.of("微波炉内部出现明火，火焰已经蔓延到炉门边缘。","洗衣机内的水喷到带电部件并出现火花。")){
+            var result=analyze(text);
+            assertEquals("AI",result.path("source").asText());
+            assertEquals("URGENT",result.path("priority").asText());
+            assertEquals(text,result.path("summary").asText());
+            assertEquals("ORIGINAL",result.path("summarySource").asText());
+            assertFalse(result.toString().contains("虚构已检修"));
+            var row=db.required("SELECT summary,priority_result FROM ai_analysis_record WHERE id=?",result.path("analysisId").asText());
+            assertEquals(text,row.get("summary"));assertEquals("URGENT",row.get("priorityResult"));
+        }
+    }
+    @Test void urgentNoticeSurvivesProviderFailureWithoutPretendingAiSucceeded(){
+        mode.set("error");var result=analyze("插座正在冒火花。");
+        assertEquals("MANUAL",result.path("source").asText());assertTrue(result.path("priority").isNull());
+        assertEquals("URGENT",result.path("safetyPriority").asText());assertFalse(result.path("safetyNotice").asText().isBlank());
+        assertEquals("插座正在冒火花。",result.path("summary").asText());
+    }
+    @Test void labelsOnlyResponseIsValidAndKeepsOriginalText(){
+        mode.set("labelsOnly");var result=analyze("水龙头滴水，已关闭阀门，没有火花或烟雾。");
+        assertEquals("AI",result.path("source").asText());assertEquals("NORMAL",result.path("priority").asText());
+        assertTrue(result.path("safetyPriority").isNull());
+        assertEquals("水龙头滴水，已关闭阀门，没有火花或烟雾。",result.path("summary").asText());
+    }
     @Test void providerFailuresOpenCircuitAndSuccessfulProbeRecovers(){
         mode.set("error");for(int i=0;i<3;i++)assertEquals("MANUAL",analyze("水管漏水").path("source").asText());
-        var blocked=analyze("保留人工描述");assertEquals(3,requests.get());assertEquals("MANUAL",blocked.path("source").asText());
+        var blocked=analyze("插座正在冒火花。");assertEquals(3,requests.get());assertEquals("MANUAL",blocked.path("source").asText());
+        assertEquals("URGENT",blocked.path("safetyPriority").asText());assertTrue(blocked.path("priority").isNull());
         assertEquals("AI_CIRCUIT_OPEN",db.required("SELECT error_code FROM ai_analysis_record WHERE id=?",blocked.path("analysisId").asText()).get("errorCode"));
         db.execute("UPDATE ai_circuit_state SET open_until=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE provider_key=?",AiGuard.providerKey(endpoint,"local-stub-model"));mode.set("valid");
         assertEquals("AI",analyze("恢复探测").path("source").asText());assertEquals(4,requests.get());

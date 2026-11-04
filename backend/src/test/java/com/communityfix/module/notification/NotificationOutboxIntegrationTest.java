@@ -72,6 +72,7 @@ class NotificationOutboxIntegrationTest {
         String event = "test:" + UUID.randomUUID();
         try {
             db.execute("INSERT INTO wechat_subscription_grant(user_id,template_id,remaining_count) VALUES (?,'test-template',1)", user);
+            when(sender.orderEnabled()).thenReturn(true);
             subscriptions.enqueueOrder(user, 123, event, "CF-TEST-123", "ASSIGNED");
             subscriptions.enqueueOrder(user, 123, event, "CF-TEST-123", "ASSIGNED");
             assertEquals(0, db.required("SELECT remaining_count FROM wechat_subscription_grant WHERE user_id=?", user).get("remainingCount"));

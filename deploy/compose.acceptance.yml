@@ -21,6 +21,14 @@ x-backend: &backend
     AI_ENDPOINT: http://mock/chat/completions
     AI_API_KEY: synthetic-only
     AI_MODEL: acceptance-mock
+    RABBITMQ_ENABLED: "true"
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_USERNAME: acceptance
+    RABBITMQ_PASSWORD: ${CF_PASSWORD}
+    REDIS_ENABLED: "true"
+    REDIS_HOST: redis
+    REDIS_NAMESPACE: acceptance
+    AI_PROVIDER_REQUESTS_PER_MINUTE: "300"
     WECHAT_APP_ID: ""
     WECHAT_APP_SECRET: ""
     WECHAT_ORDER_TEMPLATE_ID: ""
@@ -31,10 +39,23 @@ x-backend: &backend
     COMMUNITYFIX_MAINTENANCE_CLEANUP_DELAY_MS: "5000"
   depends_on:
     mysql: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+    redis: {condition: service_healthy}
     minio: {condition: service_started}
     registry: {condition: service_started}
     mock: {condition: service_started}
 services:
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: acceptance
+      RABBITMQ_DEFAULT_PASS: ${CF_PASSWORD}
+    healthcheck:
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
   mysql:
     image: mysql:8.4.5
     environment:

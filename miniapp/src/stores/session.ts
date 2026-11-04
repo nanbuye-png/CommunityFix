@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { request } from '../api'
+import { startNotifications } from '../liveNotifications'
+import { expireSession } from '../sessionStorage'
 import { resetTabHistory } from '../tabNavigation'
 import { readSessionValue, writeSessionValue, clearSessionValues } from '../sessionStorage'
 export const useSession=defineStore('session',()=>{
@@ -17,7 +19,7 @@ export const useSession=defineStore('session',()=>{
    throw new Error('Wrong role')
   }
   resetTabHistory();user.value=result.user;roles.value=result.roles;activeRole.value=role
-  writeSessionValue('token',result.token);persist()
+  writeSessionValue('token',result.token);persist();startNotifications(result.token,()=>expireSession(result.token))
  }
  function persist(){writeSessionValue('session',{user:user.value,roles:roles.value,activeRole:activeRole.value})}
  function switchRole(role:string){if(!roles.value.includes(role))return;resetTabHistory();activeRole.value=role;persist();uni.reLaunch({url:'/pages/home/index'})}

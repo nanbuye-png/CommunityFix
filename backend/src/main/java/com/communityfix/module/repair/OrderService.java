@@ -13,8 +13,8 @@ import java.util.*;
 
 @Service
 public class OrderService {
-    private final Db db;private final CommunityService communities;private final IdempotencyService idempotency;private final NotificationService notifications;private final Clock clock;
-    public OrderService(Db db,CommunityService communities,IdempotencyService idempotency,NotificationService notifications,Clock clock){this.db=db;this.communities=communities;this.idempotency=idempotency;this.notifications=notifications;this.clock=clock;}
+    private final com.communityfix.module.billing.BillingPolicy billing;private final Db db;private final CommunityService communities;private final IdempotencyService idempotency;private final NotificationService notifications;private final Clock clock;
+    public OrderService(Db db,CommunityService communities,IdempotencyService idempotency,NotificationService notifications,Clock clock,com.communityfix.module.billing.BillingPolicy billing){this.billing=billing;this.db=db;this.communities=communities;this.idempotency=idempotency;this.notifications=notifications;this.clock=clock;}
     private static final String VIEW="SELECT o.*,s.nickname AS resident_name,c.name AS community_name,b.building_no,u.unit_no,r.room_no,cat.name AS category_name,w.real_name AS worker_name FROM repair_order o JOIN sys_user s ON s.id=o.resident_id JOIN community c ON c.id=o.community_id JOIN room r ON r.id=o.room_id JOIN unit u ON u.id=r.unit_id JOIN building b ON b.id=u.building_id JOIN repair_category cat ON cat.id=o.category_id LEFT JOIN worker_profile w ON w.id=o.worker_id";
     public Map<String,Object> read(long id){var row=db.required(VIEW+" WHERE o.id=?",id);checkRead(row);return row;}
     public void checkRead(Map<String,Object> order){
@@ -37,6 +37,8 @@ public class OrderService {
     @Transactional public Object create(OrderController.Create body,String key){
         return idempotency.run("order:create",key,body,()->{
             var user=CurrentUser.get();user.role("RESIDENT");user.permission("repair:create");
+            String scope=body.facilityScope()==null?"PRIVATE":body.facilityScope();
+            if("PUBLIC".equals(scope))requireText(body.locationText(),200,"请填写公共设施实际位置");
             var room=communities.room(body.roomId());communities.enabled(room);
             var binding=db.row("SELECT id FROM resident_room_binding WHERE user_id=? AND room_id=? AND status='APPROVED' FOR UPDATE",user.id(),body.roomId());
             if(binding==null)throw ApiException.bad("请选择已经审核通过的房屋");
@@ -44,7 +46,7 @@ public class OrderService {
             var sla=db.required("SELECT * FROM sla_rule WHERE priority=? AND enabled=1",body.priority());Instant now=clock.instant();
             if((body.appointmentStartAt()==null)!=(body.appointmentEndAt()==null))throw ApiException.bad("预约开始与结束时间须同时填写");
             if(body.appointmentStartAt()!=null&&(body.appointmentStartAt().isBefore(now)||!body.appointmentEndAt().isAfter(body.appointmentStartAt())))throw ApiException.bad("预约时间无效");
-            long id=db.insert("repair_order",Db.fields("order_no","CF"+UUID.randomUUID().toString().replace("-","").substring(0,24).toUpperCase(Locale.ROOT),"resident_id",user.id(),"community_id",room.get("communityId"),"room_id",body.roomId(),"category_id",body.categoryId(),"title",body.title(),"description",body.description(),"priority",body.priority(),"status","SUBMITTED","status_changed_at",now,"response_started_at",now,"response_deadline_at",now.plusSeconds(Db.integer(sla,"responseMinutes")*60L),"sla_rule_id",sla.get("id"),"response_minutes_snapshot",sla.get("responseMinutes"),"completion_minutes_snapshot",sla.get("completionMinutes"),"appointment_start_at",body.appointmentStartAt(),"appointment_end_at",body.appointmentEndAt()));
+            long id=db.insert("repair_order",Db.fields("order_no","CF"+UUID.randomUUID().toString().replace("-","").substring(0,24).toUpperCase(Locale.ROOT),"facility_scope",scope,"location_text",body.locationText(),"billing_version",1,"resident_id",user.id(),"community_id",room.get("communityId"),"room_id",body.roomId(),"category_id",body.categoryId(),"title",body.title(),"description",body.description(),"priority",body.priority(),"status","SUBMITTED","status_changed_at",now,"response_started_at",now,"response_deadline_at",now.plusSeconds(Db.integer(sla,"responseMinutes")*60L),"sla_rule_id",sla.get("id"),"response_minutes_snapshot",sla.get("responseMinutes"),"completion_minutes_snapshot",sla.get("completionMinutes"),"appointment_start_at",body.appointmentStartAt(),"appointment_end_at",body.appointmentEndAt()));
             if(body.analysisId()!=null)db.execute("UPDATE ai_analysis_record SET order_id=?,adopted_result=JSON_OBJECT('categoryId',?,'priority',?,'title',?,'description',?) WHERE id=? AND user_id=? AND order_id IS NULL AND status='SUCCESS'",id,body.categoryId().toString(),body.priority(),AiPrivacy.redact(body.title(),user.nickname()),AiPrivacy.redact(body.description(),user.nickname()),body.analysisId(),user.id());
             attach(id,0,"FAULT",body.attachmentIds());var order=db.required("SELECT * FROM repair_order WHERE id=?",id);log(order,null,"create",null);notifications.order(order,"create",null);
             return read(id);
@@ -61,6 +63,7 @@ public class OrderService {
             if(action.equals("review")&&body.approved()==null)throw ApiException.bad("请明确审核结果");
             String old=(String)order.get("status"),next=OrderRules.next(old,action,Boolean.TRUE.equals(body.approved()));
             if(Set.of("reject","cancel","revoke","rework").contains(action)||(action.equals("review")&&!Boolean.TRUE.equals(body.approved())))requireText(body.reason(),500,"请填写原因");
+            if(Set.of("assign","start","finish","confirm").contains(action))billing.requireAccepted(order);
             Long previousUser=null;
             if(order.get("workerId")!=null){var worker=db.required("SELECT * FROM worker_profile WHERE id=? FOR UPDATE",order.get("workerId"));previousUser=Db.id(worker,"userId");}
             Map<String,Object> changes=Db.fields("status",next,"status_changed_at",clock.instant(),"updated_at",clock.instant(),"version",body.version()+1);
@@ -72,7 +75,7 @@ public class OrderService {
                 case "reject","revoke" -> {db.execute("UPDATE repair_assignment SET status=?,ended_at=?,reason=? WHERE id=?",action.equals("reject")?"REJECTED":"REVOKED",clock.instant(),body.reason(),order.get("currentAssignmentId"));clearWorker(changes);}
                 case "start" -> changes.put("started_at",clock.instant());
                 case "finish" -> {requireText(body.content(),2000,"请填写维修结果");db.insert("repair_work_record",Db.fields("order_id",id,"worker_id",order.get("workerId"),"round_no",order.get("roundNo"),"assignment_id",order.get("currentAssignmentId"),"record_type","RESULT","content",body.content(),"finished_at",clock.instant()));attach(id,Db.integer(order,"roundNo"),"RESULT",body.attachmentIds());changes.put("finished_at",clock.instant());db.execute("UPDATE repair_assignment SET status='FINISHED',ended_at=? WHERE id=?",clock.instant(),order.get("currentAssignmentId"));}
-                case "confirm" -> changes.put("closed_at",clock.instant());
+                case "confirm" -> {changes.put("closed_at",clock.instant());billing.onConfirmed(order);}
                 case "rework" -> {clearWorker(changes);changes.put("round_no",Db.integer(order,"roundNo")+1);changes.put("response_started_at",clock.instant());changes.put("response_deadline_at",clock.instant().plusSeconds(Db.integer(order,"responseMinutesSnapshot")*60L));changes.put("finished_at",null);}
                 default -> {}
             }
@@ -102,6 +105,6 @@ public class OrderService {
     public Object logs(long id){read(id);return db.rows("SELECT * FROM repair_order_log WHERE order_id=? ORDER BY new_version",id);}
     public Object records(long id){read(id);return db.rows("SELECT * FROM repair_work_record WHERE order_id=? ORDER BY id",id);}
     public Object media(long id){read(id);return db.rows("SELECT id,file_id,type,round_no FROM repair_order_media WHERE order_id=? ORDER BY id",id);}
-    @Transactional public Object progress(long id,String content){var order=db.required("SELECT * FROM repair_order WHERE id=? FOR UPDATE",id);var user=CurrentUser.get();user.role("WORKER");if(!Objects.equals(order.get("workerId"),user.workerId())||!"IN_PROGRESS".equals(order.get("status")))throw ApiException.forbidden();requireText(content,2000,"请填写维修记录");return db.insert("repair_work_record",Db.fields("order_id",id,"worker_id",user.workerId(),"round_no",order.get("roundNo"),"assignment_id",order.get("currentAssignmentId"),"record_type","PROGRESS","content",content));}
+    @Transactional public Object progress(long id,String content){var order=db.required("SELECT * FROM repair_order WHERE id=? FOR UPDATE",id);var user=CurrentUser.get();user.role("WORKER");if(!Objects.equals(order.get("workerId"),user.workerId())||!"IN_PROGRESS".equals(order.get("status")))throw ApiException.forbidden();billing.requireAccepted(order);requireText(content,2000,"请填写维修记录");return db.insert("repair_work_record",Db.fields("order_id",id,"worker_id",user.workerId(),"round_no",order.get("roundNo"),"assignment_id",order.get("currentAssignmentId"),"record_type","PROGRESS","content",content));}
     public static void requireText(String text,int length,String message){if(text==null||text.isBlank()||text.length()>length)throw ApiException.bad(message);}
 }

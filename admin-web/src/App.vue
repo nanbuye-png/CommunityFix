@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { notificationUnread, notificationOnline } from './liveNotifications'
 import { useRoute,useRouter } from 'vue-router'
 import { useSession } from './stores/session'
 import { Wrench,LayoutDashboard,KeyRound,MessageSquare,Users,Building2,ShieldCheck,Bell,LogOut,House,ClipboardCheck,Contact,FileText,Clock3,Send } from 'lucide-vue-next'
@@ -36,7 +37,7 @@ async function logout(){await session.logout();router.replace('/login')}
       <div class="sidebar-bottom"><span class="status-dot"></span>每一次报修，都有回应</div>
     </aside>
     <div class="main-shell">
-      <header class="topbar"><div class="breadcrumb">社区服务 <span>/</span> <strong>{{title}}</strong></div><div class="account"><span class="avatar">{{session.user?.nickname?.slice(0,1)}}</span><span>{{session.user?.nickname}}<small>{{session.roles.includes('ADMIN')?'物业管理员':'系统管理员'}}</small></span><button class="icon-button" aria-label="退出登录" @click="logout"><LogOut :size="17"/></button></div></header>
+      <header class="topbar"><div class="breadcrumb">社区服务 <span>/</span> <strong>{{title}}</strong></div><div class="account"><RouterLink to="/notifications" :title="notificationOnline?'通知已连接':'通知重连中，可手动刷新'">消息 {{notificationUnread>99?'99+':notificationUnread}}</RouterLink><span class="avatar">{{session.user?.nickname?.slice(0,1)}}</span><span>{{session.user?.nickname}}<small>{{session.roles.includes('ADMIN')?'物业管理员':'系统管理员'}}</small></span><button class="icon-button" aria-label="退出登录" @click="logout"><LogOut :size="17"/></button></div></header>
       <main><RouterView :key="route.fullPath"/></main>
     </div>
   </div>

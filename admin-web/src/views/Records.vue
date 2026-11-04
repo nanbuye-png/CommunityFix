@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref,computed,onMounted } from 'vue'
+import { ref,computed,onMounted,onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus,RefreshCw } from 'lucide-vue-next'
 import { ElMessage,ElMessageBox } from 'element-plus'
 import { get,post,patch,remove,date,statusNames } from '../api'
 import { useSession } from '../stores/session'
+function liveRefresh(){if(section==='notifications')load()}
+onMounted(()=>window.addEventListener('cf-notifications',liveRefresh))
+onUnmounted(()=>window.removeEventListener('cf-notifications',liveRefresh))
 const route=useRoute(),session=useSession(),section=String(route.params.section),rows=ref<any[]>([]),busy=ref(false),total=ref(0),page=ref(1),open=ref(false),form=ref<any>({}),saving=ref(false),communities=ref<any[]>([]),users=ref<any[]>([]),roles=ref<any[]>([]),permissions=ref<any[]>([]),categories=ref<any[]>([]),baseType=ref('communities'),communityId=ref(''),buildingId=ref(''),unitId=ref(''),buildings=ref<any[]>([]),units=ref<any[]>([])
 const config:Record<string,any>={
 bindings:{title:'房屋绑定审核',description:'先确认房屋归属，再开启居民报修服务。',endpoint:'/room-bindings',columns:[['nickname','居民'],['communityName','小区'],['buildingNo','楼栋'],['unitNo','单元'],['roomNo','房号'],['status','审核状态'],['reviewReason','审核说明']]},
@@ -108,7 +111,7 @@ onMounted(load)
 <template v-if="section==='bindings'"><el-button v-if="row.status==='PENDING'" :disabled="bindingBusy" link type="primary" @click="binding(row,'approve')">通过</el-button><el-button v-if="row.status==='PENDING'" :disabled="bindingBusy" link @click="binding(row,'reject')">驳回</el-button><el-button v-if="row.status==='APPROVED'" :disabled="bindingBusy" link type="danger" @click="binding(row,'revoke')">撤销绑定</el-button><span v-if="['REJECTED','REVOKED'].includes(row.status)" class="muted">等待居民重新申请</span></template>
 <template v-if="section==='complaints'"><el-button link type="primary" @click.stop="showComplaint(row)">查看详情</el-button><el-button v-if="row.status!=='CLOSED'" link type="primary" @click.stop="showComplaint(row)">{{row.status==='OPEN'?'受理':'处理'}}</el-button></template>
 <template v-if="section==='notices'"><el-button link type="primary" @click="post(`/notices/${row.id}/${row.status==='PUBLISHED'?'offline':'publish'}`).then(load)">{{row.status==='PUBLISHED'?'下架':'发布'}}</el-button></template>
-<template v-if="section==='notifications'"><RouterLink v-if="row.supportSessionId" :to="`/support?id=${row.supportSessionId}`">查看咨询</RouterLink><el-button v-if="!Number(row.readStatus)" link type="primary" @click="post(`/notifications/${row.id}/read`).then(load)">标记已读</el-button></template>
+<template v-if="section==='notifications'"><RouterLink v-if="row.orderId" :to="`/orders?orderId=${row.orderId}`">查看工单及报价</RouterLink><RouterLink v-if="row.supportSessionId" :to="`/support?id=${row.supportSessionId}`">查看咨询</RouterLink><el-button v-if="!Number(row.readStatus)" link type="primary" @click="post(`/notifications/${row.id}/read`).then(load)">标记已读</el-button></template>
 <template v-if="section==='users'"><el-button link type="primary" @click="userEdit(row)">编辑</el-button><el-button v-if="row.roles?.includes('RESIDENT')&&row.addresses?.length" link type="primary" @click="userMove(row)">搬家</el-button></template>
 <template v-if="section==='base'&&baseType==='communities'&&session.roles.includes('SUPER_ADMIN')&&session.can('system:community')"><el-button link type="danger" :disabled="busy" @click="deleteCommunity(row)">删除</el-button></template><template v-if="['users','base'].includes(section)"><el-button link :type="row.status==='ENABLED'?'danger':'primary'" :disabled="section==='users'&&row.id===session.user?.id" @click="toggle(row)">{{row.status==='ENABLED'?'停用':'启用'}}</el-button></template>
 <el-button v-if="section==='roles'&&row.roleCode!=='SUPER_ADMIN'" link type="primary" @click="roleEdit(row)">配置权限</el-button><el-button v-if="section==='grants'" link type="danger" @click="grantRevoke(row)">撤销授权</el-button>

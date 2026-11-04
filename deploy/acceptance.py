@@ -41,7 +41,7 @@ def save(path, data):
 
 def clean_env():
     prefixes = ('CF_', 'COMPOSE_', 'DB_', 'DEMO_', 'BOOTSTRAP_', 'JWT_', 'MINIO_',
-                'STORAGE_', 'AI_', 'WECHAT_', 'SPRING_', 'COMMUNITYFIX_', 'EUREKA_',
+                'STORAGE_', 'AI_', 'REDIS_', 'RABBITMQ_', 'WECHAT_', 'SPRING_', 'COMMUNITYFIX_', 'EUREKA_',
                 'SERVER_', 'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS')
     return {k: v for k, v in os.environ.items() if not k.startswith(prefixes)}
 

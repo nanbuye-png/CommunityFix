@@ -11,6 +11,12 @@ spring:
             locator:
               enabled: false
           routes:
+            - id: communityfix-notifications-live
+              uri: lb:ws://communityfix-service
+              predicates:
+                - Path=/api/notifications/live
+              filters:
+                - PreserveHostHeader
             - id: communityfix-api
               uri: lb://communityfix-service
               predicates:

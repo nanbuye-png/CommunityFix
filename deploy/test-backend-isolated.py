@@ -35,9 +35,45 @@ def main():
                DB_USER=user, DB_PASSWORD=password, JWT_SECRET=secrets.token_urlsafe(48),
                BOOTSTRAP_USERNAME='admin', BOOTSTRAP_PASSWORD=password, DEMO_ENABLED='true',
                STORAGE_MODE='local', STORAGE_DIRECTORY=str(folder / 'uploads'),
-               EUREKA_ENABLED='false', CF_INTEGRATION='true')
-    report, created, granted = {'result': 'FAIL'}, False, False
+               EUREKA_ENABLED='false', CF_INTEGRATION='true', COMMUNITYFIX_SUPPORT_JOBS_ENABLED='false')
+    redis_name = 'cf-test-redis-' + uuid.uuid4().hex[:12]
+    redis_password = secrets.token_urlsafe(32)
+    rabbit_name = 'cf-test-rabbit-' + uuid.uuid4().hex[:12]
+    rabbit_password = secrets.token_urlsafe(32)
+    rabbit_created = False
+    report, created, granted, redis_created = {'result': 'FAIL'}, False, False, False
     try:
+        subprocess.run(['docker', 'run', '-d', '--name', rabbit_name, '--hostname', 'rabbit-test', '-p', '127.0.0.1::5672',
+                        '-e', 'RABBITMQ_DEFAULT_USER=test', '-e', 'RABBITMQ_DEFAULT_PASS=' + rabbit_password,
+                        'rabbitmq:4.2-management-alpine'], check=True, capture_output=True, timeout=180)
+        rabbit_created = True
+        rabbit_port = subprocess.check_output(['docker', 'port', rabbit_name, '5672/tcp'], text=True, timeout=15).strip().rsplit(':', 1)[1]
+        for attempt in range(60):
+            ready = subprocess.run(['docker', 'exec', '--user', 'rabbitmq', rabbit_name, 'rabbitmq-diagnostics', '-q', 'check_port_connectivity'], capture_output=True, timeout=10)
+            if ready.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            diagnostic = subprocess.run(['docker', 'logs', '--tail', '50', rabbit_name], capture_output=True)
+            (folder / 'rabbit-startup.log').write_bytes((ready.stdout + ready.stderr + diagnostic.stdout + diagnostic.stderr).replace(rabbit_password.encode(), b'[redacted]'))
+            raise RuntimeError('Isolated RabbitMQ did not become ready')
+        env.update(CF_RABBIT_INTEGRATION='true', CF_RABBIT_PORT=rabbit_port, CF_RABBIT_PASSWORD=rabbit_password,
+                   RABBITMQ_ENABLED='false')
+        subprocess.run(['docker', 'run', '-d', '--name', redis_name, '-p', '127.0.0.1::6379',
+                        'redis:7.4.2-alpine', 'redis-server', '--requirepass', redis_password],
+                       check=True, capture_output=True, timeout=120)
+        redis_created = True
+        port = subprocess.check_output(['docker', 'port', redis_name, '6379/tcp'], text=True, timeout=15).strip().rsplit(':', 1)[1]
+        for attempt in range(30):
+            ping = subprocess.run(['docker', 'exec', '-e', 'REDISCLI_AUTH=' + redis_password,
+                                   redis_name, 'redis-cli', 'ping'], capture_output=True, text=True, timeout=5)
+            if ping.returncode == 0 and ping.stdout.strip() == 'PONG':
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError('Isolated Redis did not become ready')
+        env.update(CF_REDIS_INTEGRATION='true', CF_REDIS_PORT=port, CF_REDIS_PASSWORD=redis_password,
+                   REDIS_ENABLED='false')
         db.query(None, f'CREATE DATABASE `{schema}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci')
         created = True
         db.query(None, f"CREATE USER '{user}'@'%' IDENTIFIED BY '{password}'")
@@ -63,6 +99,10 @@ def main():
         report['result'] = 'PASS'
     finally:
         try:
+            if rabbit_created:
+                subprocess.run(['docker', 'rm', '-fv', rabbit_name], check=True, capture_output=True, timeout=30)
+            if redis_created:
+                subprocess.run(['docker', 'rm', '-fv', redis_name], check=True, capture_output=True, timeout=30)
             if granted:
                 db.query(None, f"DROP USER '{user}'@'%'")
             if created:

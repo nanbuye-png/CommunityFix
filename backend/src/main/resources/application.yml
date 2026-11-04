@@ -3,6 +3,32 @@ server:
   error:
     include-message: never
 spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:communityfix}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    connection-timeout: 2s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: auto
+        prefetch: 5
+        default-requeue-rejected: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: 500ms
+      timeout: 500ms
+      repositories:
+        enabled: false
   application:
     name: communityfix-service
   datasource:
@@ -23,6 +49,11 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 management:
+  health:
+    rabbit:
+      enabled: ${RABBITMQ_ENABLED:false}
+    redis:
+      enabled: ${REDIS_ENABLED:false}
   endpoints:
     web:
       exposure:
@@ -37,6 +68,13 @@ mybatis-plus:
     call-setters-on-nulls: true
     return-instance-for-empty-row: true
 communityfix:
+  billing:
+    mock-enabled: ${BILLING_MOCK_ENABLED:${DEMO_ENABLED:false}}
+  rabbit:
+    enabled: ${RABBITMQ_ENABLED:false}
+  redis:
+    enabled: ${REDIS_ENABLED:false}
+    namespace: ${REDIS_NAMESPACE:communityfix}
   jwt-secret: ${JWT_SECRET}
   jwt-issuer: communityfix
   jwt-audience: communityfix-client
@@ -59,13 +97,25 @@ communityfix:
   wechat:
     app-id: ${WECHAT_APP_ID:}
     app-secret: ${WECHAT_APP_SECRET:}
+    quote-template-id: ${WECHAT_QUOTE_TEMPLATE_ID:}
+    quote-order-field: ${WECHAT_QUOTE_ORDER_FIELD:}
+    quote-amount-field: ${WECHAT_QUOTE_AMOUNT_FIELD:}
     order-template-id: ${WECHAT_ORDER_TEMPLATE_ID:}
     order-number-field: ${WECHAT_ORDER_NUMBER_FIELD:}
     order-status-field: ${WECHAT_ORDER_STATUS_FIELD:}
   ai:
+    provider-requests-per-minute: ${AI_PROVIDER_REQUESTS_PER_MINUTE:30}
     endpoint: ${AI_ENDPOINT:}
     api-key: ${AI_API_KEY:}
     model: ${AI_MODEL:}
+    repair:
+      endpoint: ${AI_REPAIR_ENDPOINT:}
+      api-key: ${AI_REPAIR_API_KEY:}
+      model: ${AI_REPAIR_MODEL:}
+    support:
+      endpoint: ${AI_SUPPORT_ENDPOINT:}
+      api-key: ${AI_SUPPORT_API_KEY:}
+      model: ${AI_SUPPORT_MODEL:}
     failure-threshold: ${AI_FAILURE_THRESHOLD:3}
     cooldown-seconds: ${AI_COOLDOWN_SECONDS:60}
     retention-days: ${AI_RETENTION_DAYS:30}

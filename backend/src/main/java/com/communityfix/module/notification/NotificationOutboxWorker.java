@@ -13,6 +13,7 @@ public class NotificationOutboxWorker {
     private static final Logger log = LoggerFactory.getLogger(NotificationOutboxWorker.class);
     private final Db db;
     private final WechatMessageSender sender;
+    @org.springframework.beans.factory.annotation.Value("${communityfix.rabbit.enabled:false}") private boolean rabbitEnabled;
 
     public NotificationOutboxWorker(Db db, WechatMessageSender sender) {
         this.db = db;
@@ -21,12 +22,18 @@ public class NotificationOutboxWorker {
 
     @Scheduled(fixedDelay = 60000, initialDelay = 60000)
     public void drain() {
-        if (!sender.enabled()) return;
+        if (rabbitEnabled || !sender.enabled()) return;
         var jobs = db.rows("SELECT o.id,o.attempts,o.payload,u.wechat_openid FROM notification_outbox o " +
                 "JOIN sys_user u ON u.id=o.recipient_id WHERE o.channel='WECHAT' AND " +
                 "((o.status='PENDING' AND (o.next_retry_at IS NULL OR o.next_retry_at<=UTC_TIMESTAMP(3))) " +
                 "OR (o.status='PROCESSING' AND o.locked_until<=UTC_TIMESTAMP(3))) ORDER BY o.id LIMIT 50");
         for (var job : jobs) deliver(job);
+    }
+
+    public void deliverById(long id){
+        if(!sender.enabled())return;
+        var job=db.row("SELECT o.id,o.attempts,o.payload,u.wechat_openid FROM notification_outbox o JOIN sys_user u ON u.id=o.recipient_id WHERE o.id=? AND o.channel='WECHAT'",id);
+        if(job!=null)deliver(job);
     }
 
     void deliver(Map<String, Object> job) {
@@ -47,7 +54,7 @@ public class NotificationOutboxWorker {
             if (error.length() > 500) error = error.substring(0, 500);
             int delay = Math.min(3600, 30 * (1 << Math.min(attempt - 1, 6)));
             db.execute("UPDATE notification_outbox SET status=?,locked_until=NULL," +
-                    "next_retry_at=CASE WHEN ? >= 5 THEN NULL ELSE DATE_ADD(UTC_TIMESTAMP(3),INTERVAL ? SECOND) END," +
+                    "mq_next_publish_at=NULL,next_retry_at=CASE WHEN ? >= 5 THEN NULL ELSE DATE_ADD(UTC_TIMESTAMP(3),INTERVAL ? SECOND) END," +
                     "last_error=?,updated_at=UTC_TIMESTAMP(3) WHERE id=? AND status='PROCESSING' AND attempts=?",
                     attempt >= 5 ? "FAILED" : "PENDING", attempt, delay, error, id, attempt);
             log.warn("WeChat delivery attempt {} failed for outbox {}", attempt, id);

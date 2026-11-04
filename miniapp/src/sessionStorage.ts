@@ -1,3 +1,4 @@
+import { stopNotifications } from './liveNotifications'
 // H5 sessions belong to a tab. Mini-program storage remains device-local.
 export function readSessionValue(key: string): any {
   // #ifdef H5
@@ -18,6 +19,7 @@ export function writeSessionValue(key: string, value: any) {
   // #endif
 }
 export function clearSessionValues() {
+  stopNotifications()
   for (const key of ['token', 'session']) {
     // #ifdef H5
     window.sessionStorage.removeItem('cf_tab_v1_' + key)

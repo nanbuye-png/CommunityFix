@@ -1,5 +1,19 @@
 name: communityfix
 services:
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-communityfix}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    volumes: ["rabbitmq-data:/var/lib/rabbitmq"]
+    healthcheck:
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
   mysql:
     image: mysql:8.4.5
     environment:
@@ -18,7 +32,14 @@ services:
     restart: unless-stopped
   redis:
     image: redis:7.4.2-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes: ["redis-data:/data"]
     restart: unless-stopped
   minio:
@@ -40,10 +61,21 @@ services:
     environment:
       DB_URL: jdbc:mysql://mysql:3306/communityfix?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
       DB_USER: communityfix
+      RABBITMQ_ENABLED: "true"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-communityfix}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+      REDIS_NAMESPACE: ${REDIS_NAMESPACE:-communityfix}
+      AI_PROVIDER_REQUESTS_PER_MINUTE: ${AI_PROVIDER_REQUESTS_PER_MINUTE:-30}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-admin}
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:?Set BOOTSTRAP_PASSWORD}
+      BILLING_MOCK_ENABLED: ${BILLING_MOCK_ENABLED:-false}
       DEMO_ENABLED: ${DEMO_ENABLED:-false}
       DEMO_SYNC_PASSWORDS: ${DEMO_SYNC_PASSWORDS:-false}
       DEMO_PROPERTY_PASSWORD: ${DEMO_PROPERTY_PASSWORD:-}
@@ -55,12 +87,21 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       WECHAT_APP_ID: ${WECHAT_APP_ID:-}
       WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:-}
+      WECHAT_QUOTE_TEMPLATE_ID: ${WECHAT_QUOTE_TEMPLATE_ID:-}
+      WECHAT_QUOTE_ORDER_FIELD: ${WECHAT_QUOTE_ORDER_FIELD:-}
+      WECHAT_QUOTE_AMOUNT_FIELD: ${WECHAT_QUOTE_AMOUNT_FIELD:-}
       WECHAT_ORDER_TEMPLATE_ID: ${WECHAT_ORDER_TEMPLATE_ID:-}
       WECHAT_ORDER_NUMBER_FIELD: ${WECHAT_ORDER_NUMBER_FIELD:-}
       WECHAT_ORDER_STATUS_FIELD: ${WECHAT_ORDER_STATUS_FIELD:-}
       AI_ENDPOINT: ${AI_ENDPOINT:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-}
+      AI_REPAIR_ENDPOINT: ${AI_REPAIR_ENDPOINT:-}
+      AI_REPAIR_API_KEY: ${AI_REPAIR_API_KEY:-}
+      AI_REPAIR_MODEL: ${AI_REPAIR_MODEL:-}
+      AI_SUPPORT_ENDPOINT: ${AI_SUPPORT_ENDPOINT:-}
+      AI_SUPPORT_API_KEY: ${AI_SUPPORT_API_KEY:-}
+      AI_SUPPORT_MODEL: ${AI_SUPPORT_MODEL:-}
       AI_FAILURE_THRESHOLD: ${AI_FAILURE_THRESHOLD:-3}
       AI_COOLDOWN_SECONDS: ${AI_COOLDOWN_SECONDS:-60}
       AI_RETENTION_DAYS: ${AI_RETENTION_DAYS:-30}
@@ -68,6 +109,8 @@ services:
       EUREKA_URL: http://registry:8761/eureka/
     depends_on:
       mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
       minio: { condition: service_started }
       registry: { condition: service_started }
     restart: unless-stopped
@@ -88,6 +131,7 @@ services:
     depends_on: [gateway]
     restart: unless-stopped
 volumes:
+  rabbitmq-data:
   mysql-data:
   redis-data:
   minio-data:
