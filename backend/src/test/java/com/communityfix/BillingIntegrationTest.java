@@ -1,6 +1,10 @@
 package com.communityfix;
 
 import com.communityfix.common.Db;
+import com.communityfix.module.billing.PaymentAttemptExpiry;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -15,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @EnabledIfEnvironmentVariable(named="CF_INTEGRATION",matches="true")
 class BillingIntegrationTest {
  @Autowired TestRestTemplate rest;@Autowired Db db;@Value("${communityfix.bootstrap-password}") String password;
+ @Autowired PaymentAttemptExpiry expiry;
  String resident,property,worker;long room,wid;String id;
  @BeforeEach void setup(){resident=login("resident");property=login("property");worker=login("worker");room=Db.id(db.required("SELECT room_id FROM resident_room_binding b JOIN sys_user u ON u.id=b.user_id WHERE u.username='resident' AND b.status='APPROVED' LIMIT 1"),"roomId");wid=Db.id(db.required("SELECT w.id FROM worker_profile w JOIN sys_user u ON u.id=w.user_id WHERE u.username='worker'"),"id");}
  String login(String user){return ok(call(null,"/auth/login",Map.of("username",user,"password",password))).path("token").asText();}
@@ -36,12 +41,42 @@ class BillingIntegrationTest {
   assertEquals(409,call(resident,path()+"/billing/mock-pay",Map.of("billId",1)).getStatusCode().value());
   finish();var data=ok(call(resident,path()+"/billing",null));assertEquals(13000,data.path("bill").path("amountFen").asLong());assertEquals("UNPAID",data.path("bill").path("status").asText());
   String bill=data.path("bill").path("id").asText();
-  var first=java.util.concurrent.CompletableFuture.supplyAsync(()->call(resident,path()+"/billing/mock-pay",Map.of("billId",bill)));
-  var second=java.util.concurrent.CompletableFuture.supplyAsync(()->call(resident,path()+"/billing/mock-pay",Map.of("billId",bill)));
-  ok(first.join());ok(second.join());
-  var paid=ok(call(resident,path()+"/billing/mock-pay",Map.of("billId",bill,"amountFen",1)));
+  assertTrue(data.path("paymentAttempt").isNull());
+  var startBody=Map.of("billId",bill);
+  String start=path()+"/billing/payment-attempts",pay=path()+"/billing/mock-pay";
+  String other=login("resident2");
+  assertEquals(404,call(other,start,startBody).getStatusCode().value());
+  assertEquals("PAYMENT_ATTEMPT_REQUIRED",call(resident,pay,startBody).getBody().path("errorCode").asText());
+  var first=CompletableFuture.supplyAsync(()->ok(call(resident,start,startBody)).path("paymentAttempt"));
+  var second=CompletableFuture.supplyAsync(()->ok(call(resident,start,startBody)).path("paymentAttempt"));
+  var attempt=first.join();assertEquals(attempt,second.join());
+  assertEquals(Duration.ofMinutes(30),Duration.between(Instant.parse(attempt.path("createdAt").asText()),Instant.parse(attempt.path("expiresAt").asText())));
+  assertEquals(attempt,ok(call(resident,path()+"/billing",null)).path("paymentAttempt"));
+  String old=attempt.path("attemptNo").asText();
+  var oldBody=Map.of("billId",bill,"attemptNo",old);
+  assertEquals(404,call(other,pay,oldBody).getStatusCode().value());
+  db.execute("UPDATE repair_payment_attempt SET expires_at=UTC_TIMESTAMP(3) WHERE attempt_no=?",old);
+  assertEquals("PAYMENT_ATTEMPT_EXPIRED",call(resident,pay,oldBody).getBody().path("errorCode").asText());
+  var expired=ok(call(resident,path()+"/billing",null));
+  assertEquals("EXPIRED",expired.path("paymentAttempt").path("status").asText());
+  assertEquals("UNPAID",expired.path("bill").path("status").asText());
+  assertEquals("CLOSED",order().path("status").asText());
+  expiry.closeExpired();
+  assertEquals("EXPIRED",db.required("SELECT status FROM repair_payment_attempt WHERE attempt_no=?",old).get("status"));
+  var retry=ok(call(resident,start,startBody)).path("paymentAttempt");
+  String newNo=retry.path("attemptNo").asText();
+  assertNotEquals(old,newNo);
+  assertEquals(409,call(resident,pay,oldBody).getStatusCode().value());
+  var confirm=Map.of("billId",bill,"attemptNo",newNo,"amountFen","1");
+  var confirmation1=CompletableFuture.supplyAsync(()->call(resident,pay,confirm));
+  var confirmation2=CompletableFuture.supplyAsync(()->call(resident,pay,confirm));
+  var paid=ok(confirmation1.join());ok(confirmation2.join());
   assertEquals("MOCK_PAID",paid.path("bill").path("status").asText());assertEquals(13000,paid.path("payments").get(0).path("amountFen").asLong());
-  ok(call(resident,path()+"/billing/mock-pay",Map.of("billId",bill)));
+  assertEquals("SUCCEEDED",paid.path("paymentAttempt").path("status").asText());
+  assertEquals(newNo,paid.path("payments").get(0).path("paymentNo").asText());
+  ok(call(resident,pay,confirm));assertEquals(409,call(resident,pay,oldBody).getStatusCode().value());
+  assertEquals(2,db.count("SELECT COUNT(*) FROM repair_payment_attempt WHERE bill_id=?",bill));
+  assertEquals(1,db.count("SELECT COUNT(*) FROM notification WHERE order_id=? AND event_key=? AND user_id=(SELECT payer_id FROM repair_bill WHERE id=?)",id,"mock-paid:"+bill,bill));
   assertEquals(1,db.count("SELECT COUNT(*) FROM repair_payment WHERE bill_id=?",bill));assertEquals(1,db.count("SELECT COUNT(*) FROM repair_bill WHERE order_id=?",id));
  }
  @Test void additionalQuoteMustBeAcceptedAndStaleRevisionCannotWin(){

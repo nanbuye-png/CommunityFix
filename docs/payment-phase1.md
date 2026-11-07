@@ -29,7 +29,14 @@
 | /scope | facilityScope、locationText、reason；仅物业在审核前更正 |
 | /quotes | revision为当前最新版本（首版0）、items[{name,quantity,unitPriceFen}]、reason |
 | /decision | quoteId、accepted；仅本单居民回复待确认版本 |
-| /mock-pay | billId；不传金额，重复支付返回已存在交易 |
+| /payment-attempts | billId；创建或复用本账单有效的模拟支付单 |
+| /mock-pay | billId、attemptNo；金额取自账单，同一成功支付单可以安全重试 |
+
+居民点击「去支付」时开始 30 分钟倒计时。GET 费用详情返回数据库时间 `serverTime` 和最近一次 `paymentAttempt`（首次发起前为 null），含支付单号、金额、创建时间、截止时间和状态。刷新页面或更换设备会沿用原截止时间。
+
+从截止时刻起，服务端返回 HTTP 409 和 `PAYMENT_ATTEMPT_EXPIRED`。居民点击「重新支付」并使用新的幂等键，可获得新支付单号。旧客户端只提交账单号会收到 `PAYMENT_ATTEMPT_REQUIRED`，需更新客户端并刷新账单。付款窗口到期后，维修仍为已完成、账单仍为待支付。
+
+V9 迁移新增 `repair_payment_attempt`，每张账单最多一张 PENDING 支付单。确认时按 MySQL 时间在事务锁内校验；后台默认每分钟分批标记 EXPIRED，支付校验独立于扫描进度。付款成功时，同一事务标记 SUCCEEDED、登记模拟交易、更新账单并发送站内通知。已有已付账单无需回填支付单。
 
 V8迁移为工单新增归属、位置与计费版本，并创建repair_quote、repair_bill、repair_payment。迁移未应用到现有演示或正式数据库，仅由隔离测试使用。
 

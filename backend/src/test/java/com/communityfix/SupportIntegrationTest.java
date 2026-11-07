@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SupportIntegrationTest {
  static AtomicReference<String> captured=new AtomicReference<>(""),mode=new AtomicReference<>("valid"),citation=new AtomicReference<>("0");
  static HttpServer provider=start();static String endpoint="http://127.0.0.1:"+provider.getAddress().getPort()+"/chat";
- static HttpServer start(){try{var s=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);s.setExecutor(Executors.newCachedThreadPool(r->{Thread t=new Thread(r);t.setDaemon(true);return t;}));s.createContext("/chat",e->{captured.set(new String(e.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));if(mode.get().equals("slow"))try{Thread.sleep(11000);}catch(InterruptedException ignored){}var mapper=new ObjectMapper();String content=mapper.writeValueAsString(Map.of("answer","请先提交房屋绑定申请，等待物业审核。","citations",List.of(mode.get().equals("bad")?"9999999":citation.get())));byte[] bytes=mapper.writeValueAsBytes(Map.of("choices",List.of(Map.of("message",Map.of("content",content)))));try{e.sendResponseHeaders(mode.get().equals("error")?503:200,bytes.length);e.getResponseBody().write(bytes);}finally{e.close();}});s.start();return s;}catch(Exception e){throw new ExceptionInInitializerError(e);}}
+ static HttpServer start(){try{var s=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);s.setExecutor(Executors.newCachedThreadPool(r->{Thread t=new Thread(r);t.setDaemon(true);return t;}));s.createContext("/chat",e->{captured.set(new String(e.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));if(mode.get().equals("slow"))try{Thread.sleep(11000);}catch(InterruptedException ignored){}var mapper=new ObjectMapper();String content=mapper.writeValueAsString(mode.get().equals("chat") ? Map.of("kind","CHAT","answer","我是社区平台的 AI 助手，也可以陪你聊日常生活。","citations",List.of()) : mode.get().equals("clarify") ? Map.of("kind","CHAT","answer","能说说灯是在哪个房间坏的吗？","citations",List.of()) : Map.of("kind","KNOWLEDGE","answer","请先提交房屋绑定申请，等待物业审核。","citations",List.of(mode.get().equals("bad")?"9999999":citation.get())));byte[] bytes=mapper.writeValueAsBytes(Map.of("choices",List.of(Map.of("message",Map.of("content",content)))));try{e.sendResponseHeaders(mode.get().equals("error")?503:200,bytes.length);e.getResponseBody().write(bytes);}finally{e.close();}});s.start();return s;}catch(Exception e){throw new ExceptionInInitializerError(e);}}
  @DynamicPropertySource static void config(DynamicPropertyRegistry r){r.add("communityfix.ai.endpoint",()->endpoint);}
  @AfterAll static void stop(){provider.stop(0);}
  @Autowired TestRestTemplate rest;@Autowired Db db;@Autowired SupportJobs jobs;@Autowired SupportAi ai;@Autowired SupportService service;
@@ -52,6 +52,46 @@ class SupportIntegrationTest {
  @Test void validAiUsesSourcesAndRedactsSecrets(){var k=knowledge(root,null,"绑定");citation.set(k.path("id").asText());var s=create();send(user,s,"绑定：手机号13812345678 密码=SecretPass123 地址：青禾路123号602室");ai.process(claim(s.path("id").asLong()));String prompt=captured.get();assertFalse(prompt.contains("13812345678"));assertFalse(prompt.contains("SecretPass123"));assertFalse(prompt.contains("青禾路123"));assertTrue(events(user,s).toString().contains("AI"));assertEquals("AI",events(user,s).path("messages").get(2).path("metadata").path("source").asText());}
  @Test void invalidCitationAndTimeoutFallBack(){var k=knowledge(root,null,"专用超时词");citation.set(k.path("id").asText());var s=create();mode.set("bad");send(user,s,"专用超时词");ai.process(claim(s.path("id").asLong()));assertEquals("AI_INVALID_RESPONSE",events(user,s).path("messages").get(2).path("metadata").path("errorCode").asText());mode.set("slow");send(user,s,"专用超时词");ai.process(claim(s.path("id").asLong()));assertEquals("FALLBACK",events(user,s).path("messages").get(4).path("metadata").path("source").asText());}
  @Test void lateAiAndLeaseTakeoverAreFenced(){var s=create();send(user,s,"绑定");var first=claim(s.path("id").asLong());db.execute("UPDATE support_ai_job SET locked_until=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=?",first.get("id"));var second=jobs.claim();assertEquals(first.get("id"),second.get("id"));jobs.finish(first,"不应出现旧租约",null,null,1);assertFalse(events(user,s).toString().contains("不应出现旧租约"));s=action(user,s,"handoff");jobs.finish(second,"不应出现迟到回复",null,null,1);assertFalse(events(user,s).toString().contains("不应出现迟到回复"));}
+ @Test void greetingUsesProviderAndRetriesProduceOneReply(){
+  var s=create();mode.set("chat");
+  String path="/support/sessions/"+s.path("id").asText()+"/messages";
+  var body=Map.of("clientId",UUID.randomUUID().toString(),"content","你好！");
+  assertEquals(ok(call(user,HttpMethod.POST,path,body)).path("id"),ok(call(user,HttpMethod.POST,path,body)).path("id"));
+  ai.process(claim(s.path("id").asLong()));
+  var messages=events(user,s).path("messages");
+  assertEquals(3,messages.size());assertEquals("AI",messages.get(2).path("metadata").path("source").asText());
+  assertEquals("我是社区平台的 AI 助手，也可以陪你聊日常生活。",messages.get(2).path("content").asText());
+  assertTrue(captured.get().contains("你好"));
+  send(user,s,"你是谁");ai.process(claim(s.path("id").asLong()));
+  assertTrue(captured.get().contains("我是社区平台的 AI 助手"));
+  assertTrue(captured.get().contains("你是谁"));
+ }
+ @Test void noKnowledgeFollowUpUsesOnlyThisChatAndAcceptsUncitedClarification(){
+  var s=create();mode.set("clarify");
+  send(user,s,"家里的灯坏了");ai.process(claim(s.path("id").asLong()));
+  send(user,s,"那我要怎么提交？");ai.process(claim(s.path("id").asLong()));
+  var last=events(user,s).path("messages").get(4);
+  assertEquals("能说说灯是在哪个房间坏的吗？",last.path("content").asText());
+  assertTrue(last.path("metadata").path("citations").isEmpty());
+  assertTrue(captured.get().contains("家里的灯坏了"));assertTrue(captured.get().contains("那我要怎么提交"));
+ }
+ @Test void freeChatHasNoKnowledgeGateAndNoTemplateReplacement(){
+  mode.set("chat");var s=create();var separate=create();
+  send(user,separate,"只在另一个会话中的暗号");
+  ai.process(claim(separate.path("id").asLong()));
+  send(user,s,"我喜欢散步，周末有什么轻松的活动？");
+  ai.process(claim(s.path("id").asLong()));
+  assertEquals("我是社区平台的 AI 助手，也可以陪你聊日常生活。",events(user,s).path("messages").get(2).path("content").asText());
+  assertFalse(captured.get().contains("只在另一个会话中的暗号"));
+ }
+ @Test void missingEvidenceStillRejectsAnInventedKnowledgeAnswer(){
+  var s=create();citation.set("9999999");
+  send(user,s,"你好，请问具体要多少钱？");ai.process(claim(s.path("id").asLong()));
+  var last=events(user,s).path("messages").get(2);
+  assertEquals("AI_INVALID_RESPONSE",last.path("metadata").path("errorCode").asText());
+  assertTrue(last.path("content").asText().contains("暂时不可用"));
+  assertTrue(last.path("metadata").path("citations").isEmpty());
+ }
  @Test void rateLimitDoesNotBlockHumanMessages(){var s=create();for(int i=0;i<5;i++)send(user,s,"未命中问题"+i);assertEquals(429,call(user,HttpMethod.POST,"/support/sessions/"+s.path("id").asText()+"/messages",Map.of("clientId",UUID.randomUUID().toString(),"content","超限")).getStatusCode().value());s=action(user,s,"handoff");send(user,s,"人工留言不占AI额度");}
  @Test void retentionAndIdleClose(){var s=create();long id=s.path("id").asLong();db.execute("UPDATE support_session SET updated_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 8 DAY) WHERE id=?",id);service.maintain();assertEquals("CLOSED",events(user,s).path("session").path("status").asText());db.execute("UPDATE support_session SET closed_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 91 DAY) WHERE id=?",id);service.maintain();assertEquals(0,db.count("SELECT COUNT(*) FROM support_message WHERE session_id=?",id));assertEquals(404,call(user,HttpMethod.GET,"/support/sessions/"+id,null).getStatusCode().value());}
 }
