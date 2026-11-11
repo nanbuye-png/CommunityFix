@@ -1,6 +1,6 @@
 # CommunityFix API
 
-基路径 `/api`，开发环境从 Spring Cloud Gateway 的 8081 端口进入；登录后携带 `Authorization: Bearer ...`。BIGINT ID 为 JSON 字符串，version/page/size 为整数。统一响应 `{code,message,data,requestId,errorCode}`；HTTP 状态与 code 一致。失败返回明确错误码，不使用 HTTP 200 包装失败。
+基路径 `/api`，单业务服务开发使用 8080，完整 Cloud 模式从网关 8081 进入，容器部署从 Nginx 对外端口进入；登录后携带 `Authorization: Bearer ...`。BIGINT ID 为 JSON 字符串，version/page/size 为整数。统一响应 `{code,message,data,requestId,errorCode}`；HTTP 状态与 code 一致。失败返回明确错误码，不使用 HTTP 200 包装失败。
 
 启用 RabbitMQ 后，微信通知通过 outbox → 队列 → 消费者投递。管理员 outbox 列表新增 `mqPublishAttempts`、`mqNextPublishAt`、`mqLastError`，用于区别队列发布失败和微信发送失败；SENT 语义不变，仍表示微信接口接受。详见[通知队列说明](rabbitmq-notifications.md)。
 
@@ -9,7 +9,7 @@
 | 方法 | 路径 | 内容 |
 | --- | --- | --- |
 | POST | `/auth/login` | `{username,password}`，返回 token、expiresAt、user、roles、permissions、communityIds |
-| POST | `/auth/register` | 仅注册居民；`{username,password,nickname}` |
+| POST | `/auth/register` | 注册居民或维修人员；`{username,password,nickname,role?,communityId?}`，role 为 RESIDENT / WORKER，维修注册需选择小区 |
 | POST | `/auth/wechat-login` | `{code}`，服务端换取微信身份；需真实配置 |
 | POST | `/auth/logout` | 撤销账号已有会话 |
 | PATCH | `/system/users/{id}` | 系统管理员修改姓名、联系电话、角色、状态或密码；账号名不可变 |
@@ -22,7 +22,7 @@
 
 ## 工单
 
-2026-11-04：创建工单新增facilityScope（PUBLIC/PRIVATE，省略默认PRIVATE）和locationText（PUBLIC必填），物业审核确认归属。自费工单派单、开始、完工和验收受已确认报价约束，历史工单不受新计费规则影响。费用API与模拟支付开关见[支付第一期](payment-phase1.md)。
+创建工单支持 facilityScope（PUBLIC/PRIVATE，省略默认PRIVATE）和locationText（PUBLIC必填），默认自动审批，也可配置人工审批。自费工单派单、开始、完工和验收受已确认报价约束，历史工单不受新计费规则影响。费用API与模拟支付开关见[费用与支付规则](business-flow.md)。
 
 新建、工单动作、评价、投诉必须带 `Idempotency-Key`（8～64 位字母数字、下划线或连字符）。同键不同正文返回 409。相同键相同正文返回第一次结果。列表 `page=1,size=20`，最大 size=100；返回 `{records,total,page,size}`。
 
@@ -50,6 +50,8 @@
 | POST/GET | `/repair/orders/{id}/evaluations` | 一次评价 `{score:1到5,content?}` / 查询 |
 | POST | `/repair/orders/{id}/complaints` | `{content}`，未关闭投诉唯一 |
 | POST | `/repair/orders/{id}/recommendations` | 物业获取规则评分候选，不产生派单 |
+
+验收后售后：`GET/POST /repair/orders/{id}/aftercare` 查询或创建 `{content}`；`POST /repair/orders/{id}/aftercare/{aftercareId}` 提交 `{version,action,content}`，action 为 `accept/reject/resolve/confirm/reopen`。写操作要求 `Idempotency-Key`，权限、状态及保留原账单的约束见[售后说明](business-flow.md)。
 
 ## 消息、文件与其他模块
 
@@ -82,8 +84,50 @@ WebSocket `/notifications/live`：握手后首帧提交 `{type:"auth",token}`，
 | GET | `/system/permissions`、`/system/logs` | 权限字典与管理审计 |
 | GET/POST/DELETE | `/system/admin-communities` | 小区授权；DELETE `/{userId}/{communityId}` |
 
-代码中的 DTO 注解与 `planned/README.md` 状态矩阵为完整字段和状态约束依据。系统管理员没有默认跨小区工单读取权限。
+完整字段以控制器 DTO 注解为准，工单状态约束见 `OrderRules`、`OrderService` 与相关集成测试。系统管理员没有默认跨小区工单读取权限。
 
 辅助报修与 AI 客服共用[统一模型调用模块](model-gateway.md)。供应商 HTTP 429 记录为 `AI_PROVIDER_RATE_LIMIT`，区别于本地用户限流 `AI_RATE_LIMIT`；超时、空响应和无效答案分别记录为 `AI_TIMEOUT`、`AI_EMPTY_RESPONSE`、`AI_INVALID_RESPONSE`。这些模型失败沿用业务人工降级流程，不直接将供应商 HTTP 状态转发给前端。
 
 启用 Redis 后，跨实例模型窗口超额记录 `AI_PROVIDER_LOCAL_RATE_LIMIT`，Redis 不可用记录 `AI_LIMITER_UNAVAILABLE`，均通过上述人工降级流程处理，不发送供应商请求。
+
+
+## 费用与参考价
+
+费用操作使用版本和 `Idempotency-Key` 防止重复提交。报价金额与明细格式以 `BillingController` 的 DTO 为准；API 的 `unitPriceFen`、`laborFen`、`materialFen` 使用整数分，前端按元展示且最多两位小数。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/reference-prices?communityId=...` | 当前小区分类参考价 |
+| GET | `/reference-prices/history?communityId=...&categoryId=...` | 参考价调整历史 |
+| POST | `/reference-prices?communityId=...&categoryId=...` | 按版本保存参考价，要求幂等键 |
+
+以下路径均以 `/repair/orders/{id}/billing` 为前缀：
+
+| 方法 | 子路径 | 内容 |
+| --- | --- | --- |
+| GET | 空 | 当前报价、账单和支付状态 |
+| POST | `/quotes` | `{revision,items:[{name,quantity,unitPriceFen}],reason}` |
+| POST | `/decision` | `{quoteId,accepted}`，居民确认或拒绝 |
+| POST | `/scope` | `{version,facilityScope,locationText,reason}`，纠正公共 / 自费归属 |
+| POST | `/reference-price` | 当前工单分类参考价：`{version,enabled,laborFen,materialFen,basis}` |
+| POST | `/payment-attempts` | `{billId}`，创建或复用有效支付单 |
+| POST | `/mock-pay` | `{billId,attemptNo}`，确认当前模拟支付单 |
+
+以上写操作均要求 `Idempotency-Key`。模拟支付仅在演示模式和模拟支付开关同时开启时可用。
+
+## 客服与知识库
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/support/options` | 当前身份可选的小区与客服选项 |
+| POST / GET | `/support/sessions` | 创建 `{communityId,orderId,role}` / 查询会话 |
+| GET | `/support/sessions/{id}` | 会话详情 |
+| GET | `/support/sessions/{id}/events?after=...&wait=true` | 长轮询增量消息 |
+| POST | `/support/sessions/{id}/messages` | `{clientId,content}`，客户端消息 ID 用于幂等 |
+| POST | `/support/sessions/{id}/{action}` | `{version}`，action 为 handoff / cancel-wait / claim / takeover / close |
+| POST | `/support/sessions/{id}/read` | `{seq}` 已读位置 |
+| POST | `/support/heartbeat` | `{online}` 客服在线心跳 |
+| GET / POST / PATCH | `/support/knowledge`、`/support/knowledge/{id}` | 知识列表、新建和编辑，支持 aliases、发布状态及版本 |
+| GET | `/support/knowledge/statistics` | 当前授权范围内的 FAQ 使用统计 |
+
+已发布常见问答及别名匹配时直接回答，不调用模型；其余问题按知识检索、授权上下文和模型配置处理。人工接管、权限校验和消息重试规则以服务端状态为准。

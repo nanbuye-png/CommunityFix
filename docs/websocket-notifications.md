@@ -1,6 +1,6 @@
 # 在线 WebSocket 通知
 
-2026-11-03。管理端（SUPER_ADMIN / ADMIN）及居民、维修工客户端（RESIDENT / WORKER）接入 `/api/notifications/live`。
+管理端（SUPER_ADMIN / ADMIN）及居民、维修工客户端（RESIDENT / WORKER）接入 `/api/notifications/live`。
 
 ## 使用效果与权限
 
@@ -46,8 +46,6 @@ JWT 通过消息帧发送，不写入 URL 查询串、Cookie 或日志。浏览�
 
 实现参考 [Spring WebSocket API](https://docs.spring.io/spring-framework/reference/6.2/web/websocket/server.html)。
 
-本轮真实 WebSocket 集成测试验证四角色收件箱隔离、客户端伪造 userId 无效、重连补查及已读计数、会话撤销、无效认证、恶意 Origin 拒绝。后端 110 项测试通过，失败/错误/跳过均为 0，报告 `.local/acceptance/tests-090b7a406938/report.json`，隔离资源清理通过。
+## 验证范围
 
-前端验证：管理端类型检查与构建、移动端类型检查、H5 构建和微信小程序编译均通过。管理端仍有大包体积提示。微信编译使用 `http://127.0.0.1:8081/api` 模拟器地址，输出到 `.local/websocket-mp-build`，只证明编译通过，未改正式域名配置，也不表示手机可连接。
-
-本轮未部署正式环境。完整网关/Nginx拓扑、四角色浏览器操作、微信真机及大规模在线容量仍需后续签收，不以直接后端协议测试代替这些验收。
+构建与隔离测试入口见 [验证指南](testing.md)。真实供应商、微信真机、网络故障和生产容量需在目标环境单独验收。

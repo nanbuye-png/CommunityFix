@@ -1,6 +1,6 @@
 # 本地完整容器验收
 
-命令在 `CommunityFix` 根目录执行。该流程使用随机 `cf-accept-<12 hex>` Compose 项目、独立数据库卷和 MinIO 卷，仅绑定 `127.0.0.1`。不读取 `deploy/.env`，不改变原开发 MySQL、原附件目录或密码配置。结果见 [本轮验收记录](local-acceptance-results.md)。
+命令在 `CommunityFix` 根目录执行。该流程使用随机 `cf-accept-<12 hex>` Compose 项目、独立数据库卷和 MinIO 卷，仅绑定 `127.0.0.1`。不读取 `deploy/.env`，不改变原开发 MySQL、原附件目录或密码配置。报告保存在每次运行独立的本地输出目录。
 
 ## 前置条件和入口
 
@@ -52,7 +52,7 @@ python -B deploy/test-backend-isolated.py
 python -B deploy/rebuild-backend-from-snapshot.py --run $run --backup .local/acceptance/<run>/backup-<12hex>
 ```
 
-该备用命令离线 Maven 打包，将新 jar 放入备份记录的本地镜像，继承原非 root 用户和运行时；不下载其他镜像。输出记录基础镜像 ID、结果镜像 ID、jar 和源码哈希。Maven 本地缓存不足、快照镜像缺失或 ID 不符会失败。网络恢复后仍可按正常 `build` 流程重新完整构建。2026-10-27 [Eclipse Temurin 官方镜像](https://hub.docker.com/_/eclipse-temurin)的配置镜像代理返回 EOF，本轮已使用上述可追溯路径；未修改全局 Docker 代理。
+该备用命令离线 Maven 打包，将新 jar 放入备份记录的本地镜像，继承原非 root 用户和运行时；不下载其他镜像。输出记录基础镜像 ID、结果镜像 ID、jar 和源码哈希。Maven 本地缓存不足、快照镜像缺失或 ID 不符会失败。网络恢复后仍可按正常 `build` 流程重新完整构建。
 
 `verify` 依次检查服务健康及 Eureka 双实例、四角色登录、私有桶及并发首次上传、两个实例读取同一附件、入口图片 URL、无效/过期签名、损坏和超限图片；再执行绑定审批、报修到评价、投诉及返修、跨居民和跨小区拒绝访问。并发检查覆盖提交幂等、工人容量、SLA 去重、AI 共享限流，随后检查临时附件清理、对象缺失和 MinIO 停机后的 503 及恢复。
 

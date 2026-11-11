@@ -1,6 +1,6 @@
 # RabbitMQ 通知链路
 
-2026-11-03。本轮接入微信订阅通知的异步投递；站内通知仍在业务事务内落库，四种身份继续通过现有通知接口查看。RabbitMQ 是服务端消息队列，不向浏览器直接推送；后续新增的[WebSocket在线通知](websocket-notifications.md)独立读取站内通知摘要。
+使用微信订阅通知的异步投递；站内通知仍在业务事务内落库，四种身份继续通过现有通知接口查看。RabbitMQ 是服务端消息队列，不向浏览器直接推送；[WebSocket在线通知](websocket-notifications.md)独立读取站内通知摘要。
 
 ## 路径与保证
 
@@ -43,10 +43,6 @@ relay 每 5 秒最多扫描 50 条，用数据库条件更新争抢发布资格�
 
 迁移 `V7__notification_rabbit.sql` 添加发布尝试次数、下次发布时间、发布错误和索引。数据库状态仍为 PENDING / PROCESSING / SENT / FAILED；SENT 仍仅表示微信接口接受，不表示用户已阅读。
 
-## 验证与边界
+## 验证范围
 
-`python -X utf8 deploy/test-backend-isolated.py` 现在会创建一次性 RabbitMQ、Redis 及临时 MySQL 库，测试后清理。集成测试使用真实 broker 和数据库、模拟微信发送器，覆盖发布消费、重复处理、失败退避及终止、未路由恢复、非法消息死信、过期处理租约恢复。
-
-本轮不调用真实微信、真实 AI，不部署正式环境。运行中 broker 宕机/重启、磁盘故障、集群故障转移及真实微信通知需后续签收演练；本地协议测试不能替代这些生产验证。
-
-最终回归：105 项通过，失败、错误、跳过均为 0，含 5 项真实 RabbitMQ / MySQL 通知集成测试；临时数据库、账号和测试容器清理通过。报告为 `.local/acceptance/tests-37dd8007ef9e/report.json`，主 Compose 配置解析及差异空白检查通过。早期测试发现探针以 root 抢先创建 Erlang cookie 的权限竞争，已改用 rabbitmq 用户；同时关闭隔离测试环境其他上下文的后台客服任务，避免抢占手动测试任务。
+构建与隔离测试入口见 [验证指南](testing.md)。真实供应商、微信真机、网络故障和生产容量需在目标环境单独验收。

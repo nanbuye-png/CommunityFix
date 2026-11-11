@@ -1,32 +1,35 @@
+# Dependencies and generated artifacts
 **/target/
-**/__pycache__/
 **/node_modules/
 **/dist/
 **/unpackage/
-.env
-deploy/.env
-.local/
-*.log
-.idea/
-.DS_Store
+**/__pycache__/
+*.py[cod]
+*.tsbuildinfo
 
-# Local credentials, machine state, build caches and private test evidence
+# Local credentials and runtime data
+.env
+**/.env
 **/.env.*
 !**/.env.example
-*.tsbuildinfo
+.local/
 *.pem
 *.key
 *.p12
 *.pfx
 **/project.private.config.json
-docs/local-test-accounts.md
-docs/community-deletion-2026-11-01.md
-docs/evidence/
-docs/screenshots/*
-!docs/screenshots/support-*-20261030.png
-!docs/screenshots/self-*-20261030.png
-!docs/screenshots/worker-create-20261029.png
-!docs/screenshots/resident-isolated-20261029.png
+
+# Logs, editor state and temporary files
+*.log
+*.bak
+*.tmp
+.idea/
+.DS_Store
+Thumbs.db
 harness-progress.txt
 harness-tasks.json
 
+# Private evidence and accounts
+docs/local-test-accounts.md
+docs/evidence/
+docs/screenshots/

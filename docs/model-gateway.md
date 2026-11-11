@@ -1,6 +1,6 @@
 # 统一模型调用模块
 
-2026-11-03。辅助报修与 AI 客服现通过后端进程内的 `ModelGateway` 调用模型。该模块与用于转发 HTTP API 的 Spring Cloud Gateway 是不同模块，无需新增服务或数据库表。
+辅助报修与 AI 客服现通过后端进程内的 `ModelGateway` 调用模型。该模块与用于转发 HTTP API 的 Spring Cloud Gateway 是不同模块，无需独立部署模型网关服务。
 
 ## 调用边界
 
@@ -20,7 +20,7 @@ AI 客服 SupportAi ────┘       ↓
 
 ## 更换供应商
 
-当前适配器要求供应商兼容 **Chat Completions** 请求，并支持 `response_format: {"type":"json_object"}`、`temperature: 0`、`max_tokens: 1024`；响应使用 `choices[0].message.content` 中的 JSON 字符串。端点填写完整请求 URL，模块不会自动拼接路径。
+当前适配器要求供应商兼容 **Chat Completions** 请求，并支持 `response_format: {"type":"json_object"}`、`temperature: 0`、按场景设置的 `max_tokens`（报修默认 128、客服默认 1024）；响应使用 `choices[0].message.content` 中的 JSON 字符串。端点填写完整请求 URL，模块不会自动拼接路径。
 
 两项业务默认共同使用原配置，无需迁移现有密钥：
 
@@ -63,14 +63,10 @@ AI_SUPPORT_MODEL=replace-with-support-model-id
 
 报修错误码保存于 `ai_analysis_record.error_code`；客服保留在消息 metadata 的 `errorCode`。业务层上下文、数据库等其他异常仍可能记录原有 `AI_UNAVAILABLE` / `CONTEXT_UNAVAILABLE`，不能将这些错误统称为额度不足。前端接口字段及人工降级行为保持兼容。
 
-网关输出 `model_call` 日志，包含场景、结果、耗时、HTTP 状态、供应商返回的 prompt/completion/total token 数。缺少或无效的用量记为 null，不能据此计算零费用。日志不写提示词、回答、原始供应商错误正文、端点、密钥或请求头；业务原有脱敏记录规则保留。当前用量仅供日志诊断，未新增账单统计。
+网关输出 `model_call` 日志，包含场景、结果、耗时、HTTP 状态、供应商返回的 prompt/completion/total token 数。缺少或无效的用量记为 null，不能据此计算零费用。日志不写提示词、回答、原始供应商错误正文、端点、密钥或请求头；业务原有脱敏记录规则保留。每日用量聚合保存到 ai_daily_usage，记录未知计量次数，并按场景触发日志提醒；不等同于供应商账单或预算硬上限。
 
 已有用户请求限流与共享熔断保留。后续已接入 [Redis 共享 RPM 限流](redis.md)，启用后在熔断准入前检查端点与模型的共享窗口；新增 `AI_PROVIDER_LOCAL_RATE_LIMIT` 和 `AI_LIMITER_UNAVAILABLE` 降级码。尚无 TPM 调度。统一入口本身不会提高供应商额度，也不会修复模型分类、拒答或危险内容等能力问题。[RabbitMQ用于微信通知投递](rabbitmq-notifications.md)，[WebSocket用于在线通知](websocket-notifications.md)，二者不参与模型请求；Kafka 不引入。
 
-## 验证
+## 验证范围
 
-使用 `python -X utf8 deploy/test-backend-isolated.py` 在临时 MySQL 库执行后端回归。新增测试覆盖旧配置继承、独立场景配置、部分覆盖拒绝、异常 URL、请求协议、用量解析、供应商 HTTP 错误、空响应、错误 JSON、截断、超时、业务校验和熔断结果登记；原报修安全、客服引用、权限及任务测试一并运行。
-
-本轮结果：94 项通过，失败 / 错误 / 跳过均为 0，临时数据库和账号清理通过。原始报告保存在 `.local/acceptance/tests-d09a45fc7b74/report.json`。
-
-本次仅使用本地模拟模型端点，不消耗真实供应商额度；不执行模型训练、真实模型效果评测或正式环境部署。供应商实际协议兼容与真实质量验收仍须在切换后单独进行。
+构建与隔离测试入口见 [验证指南](testing.md)。真实供应商、微信真机、网络故障和生产容量需在目标环境单独验收。
