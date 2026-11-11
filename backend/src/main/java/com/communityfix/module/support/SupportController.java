@@ -16,7 +16,7 @@ public class SupportController {
  public record Action(@Min(0)int version){}
  public record Read(@Min(0)long seq){}
  public record Heartbeat(boolean online){}
- public record Knowledge(Long communityId,@NotBlank @Size(max=100)String title,@NotNull @Size(max=300)String keywords,@NotBlank @Size(max=500)String question,@NotBlank @Size(max=2000)String answer,@NotNull @Pattern(regexp="ALL|RESIDENT|WORKER")String audience,@NotNull @Pattern(regexp="DRAFT|PUBLISHED")String status,@Min(0)int version){}
+ public record Knowledge(@Size(max=2000) String aliases,Long communityId,@NotBlank @Size(max=100)String title,@NotNull @Size(max=300)String keywords,@NotBlank @Size(max=500)String question,@NotBlank @Size(max=2000)String answer,@NotNull @Pattern(regexp="ALL|RESIDENT|WORKER")String audience,@NotNull @Pattern(regexp="DRAFT|PUBLISHED")String status,@Min(0)int version){}
  @GetMapping("/options") Object options(){return ApiResponse.ok(service.options(CurrentUser.get()));}
  @PostMapping("/sessions") Object create(@Valid @RequestBody Create b){return ApiResponse.ok(service.create(CurrentUser.get(),b.communityId(),b.orderId(),b.role()));}
  @GetMapping("/sessions") Object list(@RequestParam(required=false)String status,@RequestParam(defaultValue="false")boolean mine,@RequestParam(defaultValue="1")int page){return ApiResponse.ok(service.list(CurrentUser.get(),status,mine,page));}
@@ -26,6 +26,7 @@ public class SupportController {
  @PostMapping("/sessions/{id}/{action:handoff|cancel-wait|claim|takeover|close}") Object action(@PathVariable long id,@PathVariable String action,@Valid @RequestBody Action b){return ApiResponse.ok(service.action(CurrentUser.get(),id,action,b.version()));}
  @PostMapping("/sessions/{id}/read") Object read(@PathVariable long id,@Valid @RequestBody Read b){service.read(CurrentUser.get(),id,b.seq());return ApiResponse.ok(null);}
  @PostMapping("/heartbeat") Object heartbeat(@RequestBody Heartbeat b){service.heartbeat(CurrentUser.get(),b.online());return ApiResponse.ok(null);}
+ @GetMapping("/knowledge/statistics") Object statistics(){return ApiResponse.ok(knowledge.statistics(CurrentUser.get()));}
  @GetMapping("/knowledge") Object knowledge(@RequestParam(required=false)Long communityId,@RequestParam(defaultValue="false")boolean editing,@RequestParam(defaultValue="1")int page){return ApiResponse.ok(knowledge.list(CurrentUser.get(),communityId,editing,page));}
  @PostMapping("/knowledge") Object add(@Valid @RequestBody Knowledge b){return ApiResponse.ok(knowledge.save(CurrentUser.get(),null,b));}
  @PatchMapping("/knowledge/{id}") Object edit(@PathVariable long id,@Valid @RequestBody Knowledge b){return ApiResponse.ok(knowledge.save(CurrentUser.get(),id,b));}

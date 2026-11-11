@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { ref,onMounted } from 'vue'
 import { request } from '../api'
-const template=ref(''),busy=ref(false)
-onMounted(async()=>{try{template.value=(await request('/notifications/wechat-subscription')).quoteTemplateId||''}catch{}})
+const templates=ref<string[]>([]),busy=ref(false)
+onMounted(async()=>{try{const config=await request('/notifications/wechat-subscription');templates.value=[config.quoteTemplateId,config.paymentTemplateId].filter(Boolean)}catch{}})
 async function subscribe(){
  // #ifdef MP-WEIXIN
- if(!template.value||busy.value)return
+ if(!templates.value.length||busy.value)return
  busy.value=true
- try{const result=await new Promise<any>((resolve,reject)=>uni.requestSubscribeMessage({tmplIds:[template.value],success:resolve,fail:reject}));if(result[template.value]==='accept'){await request('/notifications/wechat-subscription','POST',{templateId:template.value});uni.showToast({title:'已授权一次后续报价提醒',icon:'none'})}else uni.showToast({title:'未授权，可在站内消息查看报价',icon:'none'})}catch{uni.showToast({title:'订阅未完成，请重试或查看站内消息',icon:'none'})}finally{busy.value=false}
+ try{const result=await new Promise<any>((resolve,reject)=>uni.requestSubscribeMessage({tmplIds:templates.value,success:resolve,fail:reject}));const accepted=templates.value.filter(t=>result[t]==='accept');for(const templateId of accepted)await request('/notifications/wechat-subscription','POST',{templateId});uni.showToast({title:accepted.length?`已授权${accepted.length}种费用提醒`:'未授权，可在站内查看提醒',icon:'none'})}catch{uni.showToast({title:'订阅未完成，请重试或查看站内消息',icon:'none'})}finally{busy.value=false}
  // #endif
  // #ifdef H5
  uni.showToast({title:'请在微信小程序中授权订阅，网页使用在线通知',icon:'none'})
  // #endif
 }
 </script>
-<template><view v-if="template" class="notice"><button class="secondary" :disabled="busy" @click="subscribe">订阅一次后续报价微信提醒</button><view class="small">微信通知标题为“新订单通知”，用于提醒报价待确认。点击通知查看费用明细并确认或拒绝；授权仅用于之后产生的新报价。</view></view></template>
+<template><view v-if="templates.length" class="notice"><button class="secondary" :disabled="busy" @click="subscribe">订阅报价与待支付提醒</button><view class="small">报价待确认时发送“订单确认提醒”，验收后有待付账单时发送“待支付提醒”。每个模板各授权一次，点击通知可进入费用明细；授权不补发之前的提醒。</view></view></template>

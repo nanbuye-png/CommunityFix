@@ -14,6 +14,7 @@ public class ModelGateway {
         public boolean successful(){return error==null;}
     }
     private static final Logger log=LoggerFactory.getLogger(ModelGateway.class);
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private AiDailyUsage dailyUsage;
     private final ModelRoutes routes;
     private final ChatCompletionsClient client;
     private final AiGuard guard;
@@ -37,6 +38,8 @@ public class ModelGateway {
         } catch(ModelFailure e) {
             guard.failed(permit);
             return finish(scene,start,route,null,e.code(),usage,e.httpStatus());
+        } finally {
+            if(dailyUsage!=null)try{dailyUsage.record(scene,usage);}catch(RuntimeException ex){log.warn("AI_USAGE_RECORD_FAILED scene={}",scene);}
         }
         guard.succeeded(permit);
         return finish(scene,start,route,value,null,usage,200);

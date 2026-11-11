@@ -20,6 +20,12 @@ export function writeSessionValue(key: string, value: any) {
 }
 export function clearSessionValues() {
   stopNotifications()
+  // #ifdef H5
+  for(const key of Object.keys(window.sessionStorage))if(key.startsWith('cf_tab_v1_quoteDraft_'))window.sessionStorage.removeItem(key)
+  // #endif
+  // #ifndef H5
+  for(const key of uni.getStorageInfoSync().keys)if(key.startsWith('cf_quoteDraft_'))uni.removeStorageSync(key)
+  // #endif
   for (const key of ['token', 'session']) {
     // #ifdef H5
     window.sessionStorage.removeItem('cf_tab_v1_' + key)

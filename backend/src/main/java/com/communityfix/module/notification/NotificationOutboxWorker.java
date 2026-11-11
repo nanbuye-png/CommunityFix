@@ -13,6 +13,7 @@ public class NotificationOutboxWorker {
     private static final Logger log = LoggerFactory.getLogger(NotificationOutboxWorker.class);
     private final Db db;
     private final WechatMessageSender sender;
+    @org.springframework.beans.factory.annotation.Autowired private NotificationValidity validity;
     @org.springframework.beans.factory.annotation.Value("${communityfix.rabbit.enabled:false}") private boolean rabbitEnabled;
 
     public NotificationOutboxWorker(Db db, WechatMessageSender sender) {
@@ -45,7 +46,11 @@ public class NotificationOutboxWorker {
         if (claimed == 0) return;
         int attempt = Db.integer(job, "attempts") + 1;
         try {
+            var guard=validity==null?new NotificationValidity(db):validity;
+            String invalid=guard.invalidReason(id,(String)job.get("payload"));
+            if(invalid!=null){guard.skip(id,attempt,invalid,(String)job.get("payload"));return;}
             if (job.get("wechatOpenid") == null) throw new IllegalStateException("WeChat account not linked");
+            if(db.execute("UPDATE notification_outbox SET send_started=TRUE WHERE id=? AND status='PROCESSING' AND attempts=?",id,attempt)==0)return;
             sender.send((String) job.get("wechatOpenid"), (String) job.get("payload"));
             db.execute("UPDATE notification_outbox SET status='SENT',locked_until=NULL,next_retry_at=NULL,last_error=NULL," +
                     "updated_at=UTC_TIMESTAMP(3) WHERE id=? AND status='PROCESSING' AND attempts=?", id, attempt);

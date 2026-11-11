@@ -12,7 +12,11 @@ class ModelRoutesTest {
 
     @Test void existingConfigurationIsSharedWithoutOverrides(){
         var routes=new ModelRoutes(legacy());
-        assertSame(routes.forScene(ModelRoutes.Scene.REPAIR),routes.forScene(ModelRoutes.Scene.SUPPORT));
+        assertNotSame(routes.forScene(ModelRoutes.Scene.REPAIR),routes.forScene(ModelRoutes.Scene.SUPPORT));
+        assertEquals(routes.forScene(ModelRoutes.Scene.REPAIR).endpoint(),routes.forScene(ModelRoutes.Scene.SUPPORT).endpoint());
+        assertEquals(routes.forScene(ModelRoutes.Scene.REPAIR).key(),routes.forScene(ModelRoutes.Scene.SUPPORT).key());
+        assertEquals(128,routes.forScene(ModelRoutes.Scene.REPAIR).maxTokens());
+        assertEquals(1024,routes.forScene(ModelRoutes.Scene.SUPPORT).maxTokens());
         assertTrue(routes.forScene(ModelRoutes.Scene.REPAIR).configured());
         assertEquals("legacy-model",routes.forScene(ModelRoutes.Scene.SUPPORT).model());
         assertFalse(routes.forScene(ModelRoutes.Scene.REPAIR).toString().contains("legacy-secret"));

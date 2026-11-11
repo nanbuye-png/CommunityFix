@@ -3,6 +3,7 @@ import { useSession } from './stores/session'
 export const router=createRouter({history:createWebHistory(),routes:[
   {path:'/login',component:()=>import('./views/Login.vue')},
   {path:'/',redirect:'/orders'},
+  {path:'/reference-prices',component:()=>import('./views/ReferencePrices.vue'),meta:{role:'ADMIN'}},
   {path:'/orders',component:()=>import('./views/Workspace.vue'),meta:{permission:'repair:assign'}},
   {path:'/sla-warnings',component:()=>import('./views/SlaWarnings.vue'),meta:{role:'ADMIN'}},
   {path:'/notification-delivery',component:()=>import('./views/NotificationDelivery.vue'),meta:{role:'SUPER_ADMIN'}},

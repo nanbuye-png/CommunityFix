@@ -22,12 +22,34 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"communityfix.wechat.order-template-id=","communityfix.support.jobs-enabled=false","communityfix.ai.api-key=support-test-key","communityfix.ai.model=support-test"})
 @EnabledIfEnvironmentVariable(named="CF_INTEGRATION",matches="true")
 class SupportIntegrationTest {
+ @Test void publishedAliasSkipsModelAndStatisticsAreScoped(){
+  var s=create();send(user,s,"如何申请维修");ai.process(claim(s.path("id").asLong()));
+  assertEquals("KNOWLEDGE",events(user,s).path("messages").get(2).path("metadata").path("source").asText());assertEquals("",captured.get());
+  var statistics=ok(call(property,HttpMethod.GET,"/support/knowledge/statistics",null));assertTrue(statistics.path("faqReplies").asLong()>0);
+  assertEquals(403,call(user,HttpMethod.GET,"/support/knowledge/statistics",null).getStatusCode().value());
+ }
+ @Test void exactPublishedFaqSkipsProviderButCompoundQuestionDoesNot(){
+  var s=create();send(user,s,"怎么提交报修？");ai.process(claim(s.path("id").asLong()));
+  var reply=events(user,s).path("messages").get(2);
+  assertEquals("KNOWLEDGE",reply.path("metadata").path("source").asText());
+  assertEquals(1,reply.path("metadata").path("citations").size());assertEquals("",captured.get());
+  mode.set("chat");send(user,s,"怎么提交报修？另外我家这单多少钱？");ai.process(claim(s.path("id").asLong()));assertFalse(captured.get().isEmpty());
+ }
  static AtomicReference<String> captured=new AtomicReference<>(""),mode=new AtomicReference<>("valid"),citation=new AtomicReference<>("0");
  static HttpServer provider=start();static String endpoint="http://127.0.0.1:"+provider.getAddress().getPort()+"/chat";
  static HttpServer start(){try{var s=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);s.setExecutor(Executors.newCachedThreadPool(r->{Thread t=new Thread(r);t.setDaemon(true);return t;}));s.createContext("/chat",e->{captured.set(new String(e.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));if(mode.get().equals("slow"))try{Thread.sleep(11000);}catch(InterruptedException ignored){}var mapper=new ObjectMapper();String content=mapper.writeValueAsString(mode.get().equals("chat") ? Map.of("kind","CHAT","answer","我是社区平台的 AI 助手，也可以陪你聊日常生活。","citations",List.of()) : mode.get().equals("clarify") ? Map.of("kind","CHAT","answer","能说说灯是在哪个房间坏的吗？","citations",List.of()) : Map.of("kind","KNOWLEDGE","answer","请先提交房屋绑定申请，等待物业审核。","citations",List.of(mode.get().equals("bad")?"9999999":citation.get())));byte[] bytes=mapper.writeValueAsBytes(Map.of("choices",List.of(Map.of("message",Map.of("content",content)))));try{e.sendResponseHeaders(mode.get().equals("error")?503:200,bytes.length);e.getResponseBody().write(bytes);}finally{e.close();}});s.start();return s;}catch(Exception e){throw new ExceptionInInitializerError(e);}}
  @DynamicPropertySource static void config(DynamicPropertyRegistry r){r.add("communityfix.ai.endpoint",()->endpoint);}
  @AfterAll static void stop(){provider.stop(0);}
  @Autowired TestRestTemplate rest;@Autowired Db db;@Autowired SupportJobs jobs;@Autowired SupportAi ai;@Autowired SupportService service;
+ @Test void contextualRetrievalAndPendingState(){
+  var k=knowledge(property,community,"绑定材料测试");citation.set(k.path("id").asText());var s=create();
+  send(user,s,"绑定材料测试");assertEquals(1,events(user,s).path("pendingReplies").asInt());
+  ai.process(claim(s.path("id").asLong()));assertEquals(0,events(user,s).path("pendingReplies").asInt());
+  send(user,s,"那需要哪些材料？");ai.process(claim(s.path("id").asLong()));
+  assertEquals("AI",events(user,s).path("messages").get(4).path("metadata").path("source").asText());
+  assertTrue(captured.get().contains("提交申请，等待物业审核"));
+  send(user,s,"继续问一下");s=action(user,s,"handoff");assertEquals(0,events(user,s).path("pendingReplies").asInt());
+ }
  @Value("${communityfix.bootstrap-password}")String password;
  String user,root,property,other;long uid,community,room;
  ResponseEntity<JsonNode> call(String token,HttpMethod method,String path,Object body){var h=new HttpHeaders();h.setContentType(MediaType.APPLICATION_JSON);if(token!=null)h.setBearerAuth(token);return rest.exchange("/api"+path,method,new HttpEntity<>(body,h),JsonNode.class);}

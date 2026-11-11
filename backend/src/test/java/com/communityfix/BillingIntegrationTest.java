@@ -15,11 +15,67 @@ import org.springframework.http.*;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"communityfix.billing.mock-enabled=true","communityfix.wechat.order-template-id="})
+@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"communityfix.orders.auto-approve=false","communityfix.billing.mock-enabled=true","communityfix.wechat.order-template-id="})
 @EnabledIfEnvironmentVariable(named="CF_INTEGRATION",matches="true")
 class BillingIntegrationTest {
  @Autowired TestRestTemplate rest;@Autowired Db db;@Value("${communityfix.bootstrap-password}") String password;
  @Autowired PaymentAttemptExpiry expiry;
+ @Autowired com.communityfix.module.notification.NotificationValidity validity;
+ @Test void paidReminderIsSkippedWithoutRefundingAnUncertainSend() throws Exception {
+  var created=create("PRIVATE");act(property,"review",Map.of("approved",true));accept(quote(0,1000),true);begin();finish();
+  var bill=ok(call(resident,path()+"/billing",null)).path("bill");long residentId=created.path("residentId").asLong();
+  String template="payment-guard-"+UUID.randomUUID();
+  String payload=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("kind","PAYMENT_DUE","templateId",template,"orderNo",created.path("orderNo").asText(),"amountFen",2000));
+  long outbox=db.insert("notification_outbox",Db.fields("event_key","bill:"+bill.path("id").asText(),"recipient_id",residentId,"channel","WECHAT","payload",payload,"status","PROCESSING","attempts",2,"send_started",true));
+  try{
+   db.execute("INSERT INTO wechat_subscription_grant(user_id,template_id,remaining_count) VALUES (?,?,0)",residentId,template);
+   assertNull(validity.invalidReason(outbox,payload));
+   var attempt=ok(call(resident,path()+"/billing/payment-attempts",Map.of("billId",bill.path("id").asText()))).path("paymentAttempt");
+   ok(call(resident,path()+"/billing/mock-pay",Map.of("billId",bill.path("id").asText(),"attemptNo",attempt.path("attemptNo").asText())));
+   String invalid=validity.invalidReason(outbox,payload);assertNotNull(invalid);
+   validity.skip(outbox,1,invalid,payload);assertEquals("PROCESSING",db.required("SELECT status FROM notification_outbox WHERE id=?",outbox).get("status"));
+   validity.skip(outbox,2,invalid,payload);validity.skip(outbox,2,invalid,payload);
+   assertEquals("SKIPPED",db.required("SELECT status FROM notification_outbox WHERE id=?",outbox).get("status"));
+   assertEquals(0,Db.id(db.required("SELECT remaining_count FROM wechat_subscription_grant WHERE user_id=? AND template_id=?",residentId,template),"remainingCount"));
+  }finally{db.execute("DELETE FROM notification_outbox WHERE id=?",outbox);db.execute("DELETE FROM wechat_subscription_grant WHERE user_id=? AND template_id=?",residentId,template);}
+ }
+ @Test void aftercareConcurrentCreationAndActionRetryDoNotDuplicateRecords(){
+  create("PUBLIC");act(property,"review",Map.of("approved",true));begin();finish();
+  String url=path()+"/aftercare";
+  var first=CompletableFuture.supplyAsync(()->call(resident,url,Map.of("content","故障复现")));
+  var second=CompletableFuture.supplyAsync(()->call(resident,url,Map.of("content","故障复现")));
+  var results=List.of(first.join(),second.join());
+  assertEquals(1,results.stream().filter(r->r.getStatusCode().value()==200).count());
+  var created=ok(results.stream().filter(r->r.getStatusCode().value()==200).findFirst().orElseThrow());
+  String actionUrl="/api"+url+"/"+created.path("id").asText();
+  var headers=new HttpHeaders();headers.setBearerAuth(property);headers.set("Idempotency-Key",UUID.randomUUID().toString());
+  var body=new HttpEntity<>(Map.of("version",0,"action","accept","content","已受理"),headers);
+  var one=ok(rest.exchange(actionUrl,HttpMethod.POST,body,JsonNode.class));
+  var two=ok(rest.exchange(actionUrl,HttpMethod.POST,body,JsonNode.class));assertEquals(one,two);
+  assertEquals(2,ok(call(resident,url,null)).get(0).path("logs").size());
+ }
+ @Test void aftercareKeepsBillAndOrderAndRequiresResidentConfirmation(){
+  create("PRIVATE");assertEquals(400,call(resident,path()+"/aftercare",Map.of("content","尚未验收")).getStatusCode().value());
+  act(property,"review",Map.of("approved",true));accept(quote(0,1000),true);begin();finish();
+  var bill=ok(call(resident,path()+"/billing",null)).path("bill");
+  var request=ok(call(resident,path()+"/aftercare",Map.of("content","灯又不亮了")));
+  String after=path()+"/aftercare/"+request.path("id").asText();
+  assertEquals(400,call(resident,path()+"/aftercare",Map.of("content","重复申请")).getStatusCode().value());
+  assertEquals(403,call(worker,path()+"/aftercare",null).getStatusCode().value());
+  assertNotEquals(200,call(login("resident2"),path()+"/aftercare",null).getStatusCode().value());
+  assertNotEquals(200,call(login("property2"),after,Map.of("version",0,"action","accept","content","越权")).getStatusCode().value());
+  ok(call(property,after,Map.of("version",0,"action","accept","content","已受理")));
+  assertEquals(409,call(property,after,Map.of("version",0,"action","resolve","content","旧页面")).getStatusCode().value());
+  ok(call(property,after,Map.of("version",1,"action","resolve","content","已检查并处理")));
+  assertEquals(403,call(property,after,Map.of("version",2,"action","confirm","content","不能替居民确认")).getStatusCode().value());
+  ok(call(resident,after,Map.of("version",2,"action","reopen","content","仍未解决")));
+  ok(call(property,after,Map.of("version",3,"action","resolve","content","再次处理完成")));
+  ok(call(resident,after,Map.of("version",4,"action","confirm","content","已解决")));
+  assertEquals("CLOSED",order().path("status").asText());assertEquals(bill,ok(call(resident,path()+"/billing",null)).path("bill"));
+  assertEquals(6,ok(call(resident,path()+"/aftercare",null)).get(0).path("logs").size());
+  var next=ok(call(resident,path()+"/aftercare",Map.of("content","新问题")));
+  ok(call(property,path()+"/aftercare/"+next.path("id").asText(),Map.of("version",0,"action","reject","content","说明不予受理原因")));
+ }
  String resident,property,worker;long room,wid;String id;
  @BeforeEach void setup(){resident=login("resident");property=login("property");worker=login("worker");room=Db.id(db.required("SELECT room_id FROM resident_room_binding b JOIN sys_user u ON u.id=b.user_id WHERE u.username='resident' AND b.status='APPROVED' LIMIT 1"),"roomId");wid=Db.id(db.required("SELECT w.id FROM worker_profile w JOIN sys_user u ON u.id=w.user_id WHERE u.username='worker'"),"id");}
  String login(String user){return ok(call(null,"/auth/login",Map.of("username",user,"password",password))).path("token").asText();}
@@ -76,7 +132,7 @@ class BillingIntegrationTest {
   assertEquals(newNo,paid.path("payments").get(0).path("paymentNo").asText());
   ok(call(resident,pay,confirm));assertEquals(409,call(resident,pay,oldBody).getStatusCode().value());
   assertEquals(2,db.count("SELECT COUNT(*) FROM repair_payment_attempt WHERE bill_id=?",bill));
-  assertEquals(1,db.count("SELECT COUNT(*) FROM notification WHERE order_id=? AND event_key=? AND user_id=(SELECT payer_id FROM repair_bill WHERE id=?)",id,"mock-paid:"+bill,bill));
+  assertEquals(0,db.count("SELECT COUNT(*) FROM notification WHERE order_id=? AND event_key=? AND user_id=(SELECT payer_id FROM repair_bill WHERE id=?)",id,"mock-paid:"+bill,bill));
   assertEquals(1,db.count("SELECT COUNT(*) FROM repair_payment WHERE bill_id=?",bill));assertEquals(1,db.count("SELECT COUNT(*) FROM repair_bill WHERE order_id=?",id));
  }
  @Test void additionalQuoteMustBeAcceptedAndStaleRevisionCannotWin(){

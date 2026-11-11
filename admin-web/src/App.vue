@@ -8,6 +8,7 @@ const session=useSession(),route=useRoute(),router=useRouter()
 const menus=computed(()=>[
   {path:'/support',name:'客服接待',icon:MessageSquare,show:session.roles.some(r=>['ADMIN','SUPER_ADMIN'].includes(r))},
   {path:'/support-knowledge',name:'客服知识库',icon:FileText,show:session.roles.some(r=>['ADMIN','SUPER_ADMIN'].includes(r))},
+  {path:'/reference-prices',name:'维修参考价',icon:FileText,show:session.roles.includes('ADMIN')},
   {path:'/orders',name:'报修工作台',icon:LayoutDashboard,show:session.can('repair:assign')},
   {path:'/bindings',name:'房屋绑定审核',icon:KeyRound,show:session.roles.includes('ADMIN')},
   {path:'/workers',name:'维修人员',icon:Contact,show:session.roles.includes('ADMIN')||session.can('system:user')},

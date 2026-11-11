@@ -23,12 +23,12 @@ public class WechatSubscriptionService {
     }
 
     public Map<String, String> configuration() {
-        return Map.of("orderTemplateId", sender.orderEnabled() ? sender.templateId() : "", "quoteTemplateId", sender.quoteEnabled()?sender.quoteTemplateId():"");
+        return Map.of("orderTemplateId", sender.acceptanceEnabled() ? sender.acceptanceTemplateId() : "", "completionTemplateId",sender.completionEnabled()?sender.completionTemplateId():"", "quoteTemplateId",sender.confirmationEnabled()?sender.confirmationTemplateId():"","paymentTemplateId",sender.paymentEnabled()?sender.paymentTemplateId():"");
     }
 
     @Transactional
     public void grant(String templateId) {
-        if (!(sender.orderEnabled() && sender.templateId().equals(templateId)) && !(sender.quoteEnabled() && sender.quoteTemplateId().equals(templateId))) {
+        if (!(sender.acceptanceEnabled() && sender.acceptanceTemplateId().equals(templateId)) && !(sender.completionEnabled()&&sender.completionTemplateId().equals(templateId)) && !(sender.confirmationEnabled()&&sender.confirmationTemplateId().equals(templateId)) && !(sender.paymentEnabled()&&sender.paymentTemplateId().equals(templateId))) {
             throw ApiException.bad("订阅消息模板尚未配置");
         }
         long userId = CurrentUser.get().id();
@@ -37,6 +37,64 @@ public class WechatSubscriptionService {
         // 微信最终决定订阅是否有效；这里记录客户端请求成功后的单次发送意愿。
         db.execute("INSERT INTO wechat_subscription_grant(user_id,template_id,remaining_count) VALUES (?,?,1) " +
                 "ON DUPLICATE KEY UPDATE remaining_count=LEAST(20,remaining_count+1),updated_at=UTC_TIMESTAMP(3)", userId, templateId);
+    }
+
+    @Transactional
+    public void enqueueConfirmation(Map<String,Object> order,long quote,long amountFen){
+        if(!sender.confirmationEnabled())return;
+        enqueueBilling(order,"quote:"+quote,"CONFIRMATION",sender.confirmationTemplateId(),amountFen);
+    }
+
+    @Transactional
+    public void enqueuePaymentDue(Map<String,Object> order,long bill,long amountFen){
+        if(!sender.paymentEnabled())return;
+        enqueueBilling(order,"bill:"+bill,"PAYMENT_DUE",sender.paymentTemplateId(),amountFen);
+    }
+
+    private void enqueueBilling(Map<String,Object> order,String key,String kind,String template,long amountFen){
+        long user=Db.id(order,"residentId"),id=Db.id(order,"id");
+        var account=db.row("SELECT wechat_openid FROM sys_user WHERE id=?",user);
+        if(account==null||account.get("wechatOpenid")==null)return;
+        if(db.row("SELECT id FROM notification_outbox WHERE event_key=? AND recipient_id=? AND channel='WECHAT'",key,user)!=null)return;
+        var fields=Db.fields("kind",kind,"templateId",template,"orderNo",order.get("orderNo"),"amountFen",amountFen,"createdAt",localTime(order.get("createdAt")),"page","pages/detail/index?id="+id+"&billing=1");
+        if("PAYMENT_DUE".equals(kind)){fields.put("content",order.get("title"));fields.put("completedAt",localTime(order.get("closedAt")));}
+        String payload;try{payload=json.writeValueAsString(fields);}catch(JsonProcessingException e){throw new IllegalStateException(e);}
+        if(db.execute("UPDATE wechat_subscription_grant SET remaining_count=remaining_count-1,updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=? AND remaining_count>0",user,template)==0)return;
+        if(db.execute("INSERT IGNORE INTO notification_outbox(event_key,recipient_id,channel,payload) VALUES (?,?,'WECHAT',?)",key,user,payload)==0)
+            db.execute("UPDATE wechat_subscription_grant SET remaining_count=LEAST(20,remaining_count+1),updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=?",user,template);
+    }
+    private static String localTime(Object value){return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneId.of("Asia/Shanghai")).format((java.time.Instant)value);}
+
+    @Transactional
+    public void enqueueCompletion(Map<String,Object> order,String key){
+        if(!sender.completionEnabled())return;
+        long user=Db.id(order,"residentId"),id=Db.id(order,"id");String template=sender.completionTemplateId();
+        var account=db.row("SELECT wechat_openid FROM sys_user WHERE id=?",user);
+        if(account==null||account.get("wechatOpenid")==null)return;
+        if(db.row("SELECT id FROM notification_outbox WHERE event_key=? AND recipient_id=? AND channel='WECHAT'",key,user)!=null)return;
+        var bill=db.row("SELECT amount_fen FROM repair_bill WHERE order_id=?",id);
+        if(bill==null&&Db.integer(order,"billingVersion")==1&&"PRIVATE".equals(order.get("facilityScope")))bill=db.row("SELECT amount_fen FROM repair_quote WHERE order_id=? AND status='ACCEPTED' ORDER BY revision DESC LIMIT 1",id);
+        String timestamp=java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneId.of("Asia/Shanghai")).format((java.time.Instant)(order.get("finishedAt")==null?order.get("closedAt"):order.get("finishedAt")));
+        String payload;try{payload=json.writeValueAsString(Map.of("kind","COMPLETION","templateId",template,"orderNo",order.get("orderNo"),"amountFen",bill==null?0:Db.id(bill,"amountFen"),"completedAt",timestamp,"page","pages/detail/index?id="+id));}catch(JsonProcessingException e){throw new IllegalStateException(e);}
+        if(db.execute("UPDATE wechat_subscription_grant SET remaining_count=remaining_count-1,updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=? AND remaining_count>0",user,template)==0)return;
+        if(db.execute("INSERT IGNORE INTO notification_outbox(event_key,recipient_id,channel,payload) VALUES (?,?,'WECHAT',?)",key,user,payload)==0)
+            db.execute("UPDATE wechat_subscription_grant SET remaining_count=LEAST(20,remaining_count+1),updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=?",user,template);
+    }
+
+    @Transactional
+    public void enqueueAcceptance(Map<String,Object> order,String key){
+        if(!sender.acceptanceEnabled())return;
+        long user=Db.id(order,"residentId"),id=Db.id(order,"id");String template=sender.acceptanceTemplateId();
+        var account=db.row("SELECT wechat_openid FROM sys_user WHERE id=?",user);
+        if(account==null||account.get("wechatOpenid")==null)return;
+        if(db.row("SELECT id FROM notification_outbox WHERE event_key=? AND recipient_id=? AND channel='WECHAT'",key,user)!=null)return;
+        var worker=db.required("SELECT real_name FROM worker_profile WHERE id=?",order.get("workerId"));
+        var category=db.required("SELECT name FROM repair_category WHERE id=?",order.get("categoryId"));
+        String timestamp=java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneId.of("Asia/Shanghai")).format((java.time.Instant)order.get("acceptedAt"));
+        String payload;try{payload=json.writeValueAsString(Map.of("kind","ACCEPTANCE","templateId",template,"orderNo",order.get("orderNo"),"service",category.get("name"),"worker",worker.get("realName"),"acceptedAt",timestamp,"page","pages/detail/index?id="+id));}catch(JsonProcessingException e){throw new IllegalStateException(e);}
+        if(db.execute("UPDATE wechat_subscription_grant SET remaining_count=remaining_count-1,updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=? AND remaining_count>0",user,template)==0)return;
+        if(db.execute("INSERT IGNORE INTO notification_outbox(event_key,recipient_id,channel,payload) VALUES (?,?,'WECHAT',?)",key,user,payload)==0)
+            db.execute("UPDATE wechat_subscription_grant SET remaining_count=LEAST(20,remaining_count+1),updated_at=UTC_TIMESTAMP(3) WHERE user_id=? AND template_id=?",user,template);
     }
 
     @Transactional

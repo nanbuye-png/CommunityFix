@@ -13,6 +13,8 @@ import java.util.*;
 
 @Service
 public class OrderService {
+    @org.springframework.beans.factory.annotation.Value("${communityfix.orders.auto-approve:true}") private boolean autoApprove;
+    @org.springframework.beans.factory.annotation.Autowired private com.communityfix.module.billing.AutomaticQuoteService automaticQuotes;
     private final com.communityfix.module.billing.BillingPolicy billing;private final Db db;private final CommunityService communities;private final IdempotencyService idempotency;private final NotificationService notifications;private final Clock clock;
     public OrderService(Db db,CommunityService communities,IdempotencyService idempotency,NotificationService notifications,Clock clock,com.communityfix.module.billing.BillingPolicy billing){this.billing=billing;this.db=db;this.communities=communities;this.idempotency=idempotency;this.notifications=notifications;this.clock=clock;}
     private static final String VIEW="SELECT o.*,s.nickname AS resident_name,c.name AS community_name,b.building_no,u.unit_no,r.room_no,cat.name AS category_name,w.real_name AS worker_name FROM repair_order o JOIN sys_user s ON s.id=o.resident_id JOIN community c ON c.id=o.community_id JOIN room r ON r.id=o.room_id JOIN unit u ON u.id=r.unit_id JOIN building b ON b.id=u.building_id JOIN repair_category cat ON cat.id=o.category_id LEFT JOIN worker_profile w ON w.id=o.worker_id";
@@ -48,7 +50,14 @@ public class OrderService {
             if(body.appointmentStartAt()!=null&&(body.appointmentStartAt().isBefore(now)||!body.appointmentEndAt().isAfter(body.appointmentStartAt())))throw ApiException.bad("预约时间无效");
             long id=db.insert("repair_order",Db.fields("order_no","CF"+UUID.randomUUID().toString().replace("-","").substring(0,24).toUpperCase(Locale.ROOT),"facility_scope",scope,"location_text",body.locationText(),"billing_version",1,"resident_id",user.id(),"community_id",room.get("communityId"),"room_id",body.roomId(),"category_id",body.categoryId(),"title",body.title(),"description",body.description(),"priority",body.priority(),"status","SUBMITTED","status_changed_at",now,"response_started_at",now,"response_deadline_at",now.plusSeconds(Db.integer(sla,"responseMinutes")*60L),"sla_rule_id",sla.get("id"),"response_minutes_snapshot",sla.get("responseMinutes"),"completion_minutes_snapshot",sla.get("completionMinutes"),"appointment_start_at",body.appointmentStartAt(),"appointment_end_at",body.appointmentEndAt()));
             if(body.analysisId()!=null)db.execute("UPDATE ai_analysis_record SET order_id=?,adopted_result=JSON_OBJECT('categoryId',?,'priority',?,'title',?,'description',?) WHERE id=? AND user_id=? AND order_id IS NULL AND status='SUCCESS'",id,body.categoryId().toString(),body.priority(),AiPrivacy.redact(body.title(),user.nickname()),AiPrivacy.redact(body.description(),user.nickname()),body.analysisId(),user.id());
-            attach(id,0,"FAULT",body.attachmentIds());var order=db.required("SELECT * FROM repair_order WHERE id=?",id);log(order,null,"create",null);notifications.order(order,"create",null);
+            attach(id,0,"FAULT",body.attachmentIds());var order=db.required("SELECT * FROM repair_order WHERE id=?",id);log(order,null,"create",null);
+            if(autoApprove){
+                db.execute("UPDATE repair_order SET status='PENDING_DISPATCH',reviewed_at=?,review_reason='系统默认审批',version=version+1 WHERE id=?",now,id);
+                var approved=db.required("SELECT * FROM repair_order WHERE id=?",id);
+                log(approved,order,"auto_review","系统默认审批");
+                automaticQuotes.create(approved);
+            }
+            notifications.order(db.required("SELECT * FROM repair_order WHERE id=?",id),"create",null);
             return read(id);
         });
     }
@@ -70,7 +79,13 @@ public class OrderService {
             switch(action){
                 case "review" -> {changes.put("reviewer_id",user.id());changes.put("reviewed_at",clock.instant());changes.put("review_reason",body.reason());}
                 case "cancel" -> {changes.put("cancel_reason",body.reason());changes.put("canceled_at",clock.instant());}
-                case "assign" -> assign(order,body,changes);
+                case "assign" -> {
+                    if(Db.integer(order,"billingVersion")==1&&"PUBLIC".equals(order.get("facilityScope"))&&order.get("reviewerId")==null){
+                        if(!"PUBLIC".equals(body.confirmedFacilityScope()))throw ApiException.bad("派单前请确认公共设施归属；选错归属请先更正");
+                        changes.put("reviewer_id",user.id());changes.put("reviewed_at",clock.instant());changes.put("review_reason","派单时确认公共设施免付归属");
+                    }
+                    assign(order,body,changes);
+                }
                 case "accept" -> {changes.put("accepted_at",clock.instant());changes.put("completion_deadline_at",clock.instant().plusSeconds(Db.integer(order,"completionMinutesSnapshot")*60L));db.execute("UPDATE repair_assignment SET status='ACCEPTED',accepted_at=? WHERE id=?",clock.instant(),order.get("currentAssignmentId"));}
                 case "reject","revoke" -> {db.execute("UPDATE repair_assignment SET status=?,ended_at=?,reason=? WHERE id=?",action.equals("reject")?"REJECTED":"REVOKED",clock.instant(),body.reason(),order.get("currentAssignmentId"));clearWorker(changes);}
                 case "start" -> changes.put("started_at",clock.instant());

@@ -38,7 +38,11 @@ public class SupportService {
   var s=access.session(u,id,false);var messages=db.rows("SELECT * FROM support_message WHERE session_id=? AND seq>? ORDER BY seq LIMIT 100",id,after);
   for(var m:messages){Object raw=m.remove("metadataJson");if(raw!=null)try{m.put("metadata",json.readTree(raw.toString()));}catch(Exception ignored){}}
   long cursor=messages.size()==100?Db.id(messages.getLast(),"seq"):Db.id(s,"eventSeq");
-  return Db.fields("session",s,"messages",messages,"cursor",cursor,"order",card(u,s),"actions",actions(u,s));
+  return Db.fields("session",s,"messages",messages,"cursor",cursor,"order",card(u,s),"actions",actions(u,s),"pendingReplies",pendingReplies(s));
+ }
+ private long pendingReplies(Map<String,Object>s){
+  if(!"AI".equals(s.get("status")))return 0;
+  return db.count("SELECT COUNT(*) FROM support_ai_job WHERE session_id=? AND generation=? AND status IN ('PENDING','PROCESSING')",s.get("id"),s.get("aiGeneration"));
  }
  private Object card(CurrentUser u,Map<String,Object>s){if(s.get("orderId")==null)return null;try{return access.order(u,Db.id(s,"orderId"));}catch(ApiException e){return null;}}
  private Object actions(CurrentUser u,Map<String,Object>s){var actions=new ArrayList<String>();if(!access.manager(u)){actions.add("HUMAN");if(u.hasRole("RESIDENT")){actions.add("CREATE_REPAIR");actions.add("BIND_ROOM");}if(card(u,s)!=null)actions.add("ORDER_DETAIL");}return actions;}

@@ -11,7 +11,7 @@ import org.springframework.http.*;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"communityfix.wechat.order-template-id=","communityfix.ai.endpoint="})
+@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"communityfix.orders.auto-approve=false","communityfix.wechat.order-template-id=","communityfix.ai.endpoint="})
 @EnabledIfEnvironmentVariable(named="CF_INTEGRATION",matches="true")
 class WorkerManagementTest {
  @Autowired TestRestTemplate rest; @Autowired Db db;

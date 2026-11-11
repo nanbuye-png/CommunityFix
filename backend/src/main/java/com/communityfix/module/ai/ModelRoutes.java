@@ -11,6 +11,8 @@ public class ModelRoutes {
     // Intentionally not a record: generated toString must never expose credentials.
     public static final class Route {
         private final String endpoint, key, model;
+        private int maxTokens=1024;
+        public int maxTokens(){return maxTokens;}
         public Route(String endpoint, String key, String model) {
             this.endpoint=endpoint;this.key=key;this.model=model;
             if(!endpoint.isBlank()) {
@@ -29,7 +31,13 @@ public class ModelRoutes {
     private final Map<Scene,Route> routes;
     public ModelRoutes(Environment env) {
         Route legacy=read(env,"communityfix.ai");
-        routes=Map.of(Scene.REPAIR,override(env,"repair",legacy),Scene.SUPPORT,override(env,"support",legacy));
+        routes=Map.of(Scene.REPAIR,configuredRoute(env,"repair",legacy,128),Scene.SUPPORT,configuredRoute(env,"support",legacy,1024));
+    }
+    private static Route configuredRoute(Environment env,String scene,Route legacy,int defaultTokens){
+        Route source=override(env,scene,legacy);Route route=new Route(source.endpoint(),source.key(),source.model());
+        route.maxTokens=env.getProperty("communityfix.ai."+scene+".max-output-tokens",Integer.class,defaultTokens);
+        if(route.maxTokens<64||route.maxTokens>4096)throw new IllegalArgumentException("AI output token limit must be 64 to 4096");
+        return route;
     }
     private static Route read(Environment env,String prefix){
         return new Route(env.getProperty(prefix+".endpoint",""),env.getProperty(prefix+".api-key",""),env.getProperty(prefix+".model",""));

@@ -4,8 +4,8 @@ import { RefreshCw } from 'lucide-vue-next'
 import { ElMessage,ElMessageBox } from 'element-plus'
 import { get,post,date } from '../api'
 
-const labels:Record<string,string>={PENDING:'等待发送',PROCESSING:'发送中',SENT:'发送成功',FAILED:'发送失败'}
-const notes:Record<string,string>={PENDING:'等待后台任务尝试投递',PROCESSING:'已由发送任务领取',SENT:'微信接口已接受',FAILED:'自动重试已停止'}
+const labels:Record<string,string>={PENDING:'等待发送',PROCESSING:'发送中',SENT:'发送成功',FAILED:'发送失败',SKIPPED:'已失效，未发送'}
+const notes:Record<string,string>={PENDING:'等待后台任务尝试投递',PROCESSING:'已由发送任务领取',SENT:'微信接口已接受',FAILED:'自动重试已停止',SKIPPED:'业务状态已变化，停止提醒'}
 const status=ref('FAILED'),summary=ref<Record<string,number>>({}),rows=ref<any[]>([]),total=ref(0),page=ref(1),busy=ref(false),failed=ref(false),retrying=ref('')
 let requestVersion=0
 async function load(){
@@ -25,7 +25,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page-heading"><div><span class="eyebrow">通知管理 · 投递有记录</span><h1>微信通知投递</h1><p class="muted">查看接单通知的发送状态，在问题修复后重试失败记录。</p></div><button class="secondary-button" :disabled="busy" @click="load"><RefreshCw :size="16"/>刷新</button></div>
+  <div class="page-heading"><div><span class="eyebrow">通知管理 · 投递有记录</span><h1>微信通知投递</h1><p class="muted">查看订单通知的发送状态，在问题修复后重试失败记录。</p></div><button class="secondary-button" :disabled="busy" @click="load"><RefreshCw :size="16"/>刷新</button></div>
   <div class="overview-grid delivery-summary"><button v-for="(label,value) in labels" :key="value" class="metric" :class="{selected:status===value}" :aria-pressed="status===value" @click="selectStatus(value)"><span>{{label}}</span><strong :class="{warning:value==='FAILED'}">{{summary[value]??'—'}}</strong><small>{{notes[value]}}</small></button></div>
   <section class="panel">
     <div class="panel-toolbar"><div class="panel-title"><h2>{{labels[status]}}</h2><span>{{total}} 条</span></div><el-select v-model="status" aria-label="通知发送状态" class="status-filter" @change="selectStatus"><el-option v-for="(label,value) in labels" :key="value" :value="value" :label="label"/></el-select></div>

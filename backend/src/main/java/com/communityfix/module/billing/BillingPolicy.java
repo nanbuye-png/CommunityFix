@@ -19,6 +19,5 @@ public class BillingPolicy {
     public void onConfirmed(Map<String,Object> order){
         if(!chargeable(order))return;requireAccepted(order);long id=Db.id(order,"id");var quote=accepted(id);
         long bill=db.insert("repair_bill",Db.fields("order_id",id,"quote_id",quote.get("id"),"payer_id",order.get("residentId"),"amount_fen",quote.get("amountFen")));
-        notifications.send(Db.id(order,"residentId"),id,"bill:"+bill,"维修账单已生成","维修已验收，请查看账单。本阶段仅支持模拟支付，不会真实扣款。");
     }
 }

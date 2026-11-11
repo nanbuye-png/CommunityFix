@@ -24,7 +24,7 @@ public class ChatCompletionsClient {
     public Reply complete(ModelRoutes.Route route,List<Map<String,String>> messages) {
         HttpResponse<String> response;
         try {
-            var body=Map.of("model",route.model(),"temperature",0,"max_tokens",1024,"response_format",Map.of("type","json_object"),"messages",messages);
+            var body=Map.of("model",route.model(),"temperature",0,"max_tokens",route.maxTokens(),"response_format",Map.of("type","json_object"),"messages",messages);
             var request=HttpRequest.newBuilder(URI.create(route.endpoint())).header("Authorization","Bearer "+route.key()).header("Content-Type","application/json")
                 .timeout(timeout).POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
             response=client.send(request,HttpResponse.BodyHandlers.ofString());

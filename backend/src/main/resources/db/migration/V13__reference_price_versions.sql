@@ -1,0 +1,8 @@
+ALTER TABLE repair_reference_price ADD COLUMN version INT NOT NULL DEFAULT 0, ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE TABLE repair_reference_price_history (
+ id BIGINT PRIMARY KEY AUTO_INCREMENT, community_id BIGINT NOT NULL, category_id BIGINT NOT NULL,
+ labor_fen BIGINT NOT NULL, material_fen BIGINT NOT NULL, basis VARCHAR(500) NOT NULL,
+ version INT NOT NULL, enabled BOOLEAN NOT NULL, updated_by BIGINT NOT NULL,
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY(community_id) REFERENCES community(id) ON DELETE CASCADE
+);

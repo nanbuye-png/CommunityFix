@@ -68,6 +68,8 @@ mybatis-plus:
     call-setters-on-nulls: true
     return-instance-for-empty-row: true
 communityfix:
+  orders:
+    auto-approve: ${ORDER_AUTO_APPROVE:true}
   billing:
     mock-enabled: ${BILLING_MOCK_ENABLED:${DEMO_ENABLED:false}}
   rabbit:
@@ -95,6 +97,10 @@ communityfix:
     secret-key: ${MINIO_SECRET_KEY:}
     bucket: ${MINIO_BUCKET:communityfix}
   wechat:
+    confirmation-template-id: ${WECHAT_CONFIRMATION_TEMPLATE_ID:0FK0JBc2x7cjS9i6N2SokPsB-FLjMZK9Ua7O9clGzx8}
+    payment-template-id: ${WECHAT_PAYMENT_TEMPLATE_ID:payqWcSKkakhM-DNMteuYfjVsQFKk4wDdSYODl15uII}
+    acceptance-template-id: ${WECHAT_ACCEPTANCE_TEMPLATE_ID:5Rdms3X2C7xEcXijCjWKlqxNd2RcDApD4GmHDDCGwKk}
+    completion-template-id: ${WECHAT_COMPLETION_TEMPLATE_ID:cmprBc8HFLj9-w7080XZiZdhzMic8yRVzbtUstEJwkg}
     app-id: ${WECHAT_APP_ID:}
     app-secret: ${WECHAT_APP_SECRET:}
     quote-template-id: ${WECHAT_QUOTE_TEMPLATE_ID:}
@@ -104,15 +110,19 @@ communityfix:
     order-number-field: ${WECHAT_ORDER_NUMBER_FIELD:}
     order-status-field: ${WECHAT_ORDER_STATUS_FIELD:}
   ai:
+    daily-token-warning: ${AI_DAILY_TOKEN_WARNING:100000}
     provider-requests-per-minute: ${AI_PROVIDER_REQUESTS_PER_MINUTE:30}
     endpoint: ${AI_ENDPOINT:}
     api-key: ${AI_API_KEY:}
     model: ${AI_MODEL:}
     repair:
+      max-output-tokens: ${AI_REPAIR_MAX_OUTPUT_TOKENS:128}
       endpoint: ${AI_REPAIR_ENDPOINT:}
       api-key: ${AI_REPAIR_API_KEY:}
       model: ${AI_REPAIR_MODEL:}
     support:
+      max-output-tokens: ${AI_SUPPORT_MAX_OUTPUT_TOKENS:1024}
+      history-characters: ${AI_SUPPORT_HISTORY_CHARACTERS:6000}
       endpoint: ${AI_SUPPORT_ENDPOINT:}
       api-key: ${AI_SUPPORT_API_KEY:}
       model: ${AI_SUPPORT_MODEL:}
