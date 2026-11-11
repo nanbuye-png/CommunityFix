@@ -88,6 +88,7 @@ npm --prefix admin-web run dev
 
 ## 配置与部署
 
+- **第一次部署？** 从 [Ubuntu 22.04 / 2 核 4 GB 逐步部署手册](docs/first-server-deployment.md) 开始，包含服务器操作、配置填写、手机验证和故障排查。
 - [开发指南](docs/development.md)：本地启动、角色账号、微信预览与连接问题。
 - [部署指南](docs/deployment.md)：Docker Compose、公网 IP 调试与升级。
 - [配置说明](docs/configuration.md)：微信模板、AI、自动审批和中间件。

@@ -2,6 +2,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [第一次服务器部署](first-server-deployment.md) | Ubuntu 22.04 / 2 核 4 GB，逐步操作和验收 |
 | [开发指南](development.md) | 环境、启动、账号与微信调试 |
 | [部署指南](deployment.md) | 完整容器部署、公网访问与升级 |
 | [配置说明](configuration.md) | 微信、AI、费用和中间件 |

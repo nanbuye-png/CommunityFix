@@ -1,5 +1,7 @@
 # 服务器部署
 
+首次部署请先阅读 [Ubuntu 22.04 / 2 核 4 GB 逐步操作手册](first-server-deployment.md)。本文是熟悉部署后的简要参考。
+
 ## 部署内容
 
 主配置 `deploy/compose.yml` 启动 MySQL、Redis、RabbitMQ、MinIO、Eureka、业务服务、网关和 Nginx，仅 Nginx 的 HTTP 端口对外映射。管理端静态文件由 Nginx 提供；小程序需要单独编译并导入微信开发者工具。
